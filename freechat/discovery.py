@@ -23,7 +23,7 @@ def broadcast_addresses():
 
 
 def scan(timeout=1.5):
-    """LAN scan karo. Return: list of {"host", "port", "room", "users"}."""
+    """LAN scan karo. Return: list of {"host", "port", "room", "users", "locked"}."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
     sock.settimeout(0.3)
@@ -56,6 +56,7 @@ def scan(timeout=1.5):
             "port": int(info.get("port", 0)),
             "room": str(info.get("room", "")),
             "users": int(info.get("users", 0)),
+            "locked": bool(info.get("locked", False)),
         }
 
     sock.close()
