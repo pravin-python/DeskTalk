@@ -695,6 +695,8 @@ class Server:
         if http is not None:
             http.stopping = True
             http.close_listeners()
+        if self.hub is not None:
+            self.hub.stopping = True  # SPEC 2.4: new requests get server_error "restarting"; /healthz answers 503
         for task in list(self._tasks):
             task.cancel()
         if self._tasks:

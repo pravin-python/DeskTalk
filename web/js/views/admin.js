@@ -17,7 +17,7 @@ import { store } from '../core/store.js';
 import { socket } from '../core/socket.js';
 import { router } from '../core/router.js';
 import { ui } from '../core/ui.js';
-import { copyToClipboard, cpLength, debounce, errorText, fold, formatBytes, formatDateTime, formatLastSeen, serverNow, sleep } from '../core/util.js';
+import { copyToClipboard, cpLength, debounce, errorText, fold, formatBytes, formatDateTime, formatLastSeen, runPaced, serverNow } from '../core/util.js';
 import { createField, describeError } from './auth.js';
 import { mountTabbed, switchRow } from './settings.js';
 import { openDirect } from './newchat.js';
@@ -469,13 +469,14 @@ function usersPanel(env) {
   }
 
   function openAddEmployees() {
+    const ac = new AbortController();
     const text = /** @type {HTMLTextAreaElement} */ (h('textarea.input.ad-emp-text', {
       id: 'ad-emp-text', rows: 7, spellcheck: 'false', placeholder: 'Asha Verma, asha\nRavi Kumar, ravi.kumar', dir: 'auto',
     }));
     const problem = h('p.error-text', { role: 'alert', hidden: true });
     const progress = h('span.hint', { role: 'status' });
     const startBtn = h('button.btn.btn-primary', { type: 'button', onClick: () => start() }, 'Create accounts');
-    const stopBtn = h('button.btn.btn-secondary', { type: 'button', hidden: true, onClick: () => { stopped = true; stopBtn.disabled = true; } }, 'Stop');
+    const stopBtn = h('button.btn.btn-secondary', { type: 'button', hidden: true, onClick: () => { ac.abort(); stopBtn.disabled = true; } }, 'Stop');
     const resultBody = h('tbody');
     const results = h('table.ad-table.ad-results', h('caption.sr-only', 'Accounts'),
       h('thead', h('tr', ...['Name', 'Username', 'Temporary password', 'Result'].map((t) => h('th', { scope: 'col' }, t)))), resultBody);
@@ -490,7 +491,6 @@ function usersPanel(env) {
       h('div.print-area', printTitle, results),
       h('div.row.no-print', copyBtn, printBtn));
     let list = [];
-    let stopped = false;
     let running = false;
     let open = true;
 
@@ -524,36 +524,6 @@ function usersPanel(env) {
       progress.textContent = running ? `Creating accounts… ${Math.min(done, list.length)} of ${list.length}` : `${made} of ${todo} accounts created.`;
     }
 
-    async function createOne(r) {
-      for (;;) {
-        if (stopped || !open) return false;
-        try {
-          await ask('admin.create_user', { username: r.username, display_name: r.name, password: r.password, role: 'member' });
-          r.status = 'created';
-          return true;
-        } catch (err) {
-          if (err && (err.code === 'rate_limited' || err.code === 'server_busy')) {
-            r.note = `waiting ${Math.ceil(err.retry_after || 1)} s`;
-            paint();
-            await sleep(Math.max(1, Number(err.retry_after) || 1) * 1000 + 100);
-            r.note = '';
-            continue;
-          }
-          if (err && err.code === 'conflict') {
-            r.status = 'exists';
-            r.note = err.reason === 'name_taken' ? 'that name is already used' : 'username is taken';
-          } else {
-            r.status = 'failed';
-            r.note = err && (err.code === 'timeout' || err.code === 'connection_lost')
-              ? 'no answer from the server - check whether the account exists'
-              : errorText(err, 'unknown error');
-            if (err && err.reason === 'max_users') stopped = true;
-          }
-          return false;
-        }
-      }
-    }
-
     async function start() {
       problem.hidden = true;
       list = parseEmployees(text.value);
@@ -578,33 +548,42 @@ function usersPanel(env) {
         if (r.error) r.note = r.error;
       }
       running = true;
-      stopped = false;
       text.readOnly = true;
       startBtn.hidden = true;
       stopBtn.hidden = false;
       stopBtn.disabled = false;
       summary.hidden = false;
       paint();
-      let lastResponse = 0;
-      for (const r of list) {
-        if (r.status !== 'waiting') continue;
-        if (stopped || !open) {
-          r.status = 'skipped';
-          continue;
-        }
-        const wait = lastResponse + CREATE_GAP_MS - Date.now();
-        if (lastResponse && wait > 0) await sleep(wait);
-        if (stopped || !open) {
-          r.status = 'skipped';
-          continue;
-        }
+      await runPaced(list.filter((r) => r.status === 'waiting'), async (r) => {
         r.status = 'creating';
         paint();
-        await createOne(r);
-        if (r.status === 'creating') r.status = 'skipped';
-        lastResponse = Date.now();
-        paint();
-      }
+        try {
+          return await ask('admin.create_user', { username: r.username, display_name: r.name, password: r.password, role: 'member' });
+        } catch (err) {
+          if (err && err.reason === 'max_users') ac.abort();
+          throw err;
+        }
+      }, {
+        gapMs: CREATE_GAP_MS,
+        signal: ac.signal,
+        onRow: (row) => {
+          const r = row.item;
+          if (row.status === 'ok') {
+            r.status = 'created';
+          } else if (row.status === 'exists') {
+            r.status = 'exists';
+            r.note = 'that username or name is already used';
+          } else {
+            r.status = 'failed';
+            const code = row.error && row.error.code;
+            r.note = code === 'timeout' || code === 'connection_lost'
+              ? 'no answer from the server - check whether the account exists'
+              : (row.error && row.error.message) || 'unknown error';
+          }
+          paint();
+        },
+      });
+      for (const r of list) if (r.status === 'waiting' || r.status === 'creating') r.status = 'skipped';
       running = false;
       stopBtn.hidden = true;
       if (open) {
@@ -626,7 +605,7 @@ function usersPanel(env) {
       actions: [{ label: 'Close', value: true }],
       onClose: () => {
         open = false;
-        stopped = true;
+        ac.abort();
       },
     });
     text.focus();
@@ -742,7 +721,7 @@ function workspacePanel(env) {
       h('h2.st-card-title', 'Notifications and the "Not secure" label'),
       h('p', 'Over plain http browsers show "Not secure" and only allow in-page alerts, sounds and the tab badge. Desktop notifications, the clipboard and voice notes need a secure connection.'),
       h('ul.ad-list',
-        h('li', 'On the server PC itself, open http://localhost:', location.port || '8765', ' (that counts as secure).'),
+        h('li', 'On the server PC itself, type localhost:', location.port || '8765', ' into the browser (that counts as secure).'),
         h('li', 'Best: restart the server with HTTPS (--tls) and trust its certificate once per device.'),
         h('li', 'Or, on each Chrome or Edge PC, set the policy ', h('code', 'OverrideSecurityRestrictionsOnInsecureOrigin'), ' to ', h('code', origin()), ' (registry or group policy) and restart the browser.')),
       h('p.hint', 'Alerts never reach a closed browser or a locked phone; that needs a push service. Keep DeskTalk pinned in an open tab.'));

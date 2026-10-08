@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import http.client
+import io
 import json
 import os
 import shutil
@@ -520,6 +522,23 @@ class TlsTests(ServerBase):
         for name in ("cert.pem", "key.pem", "meta.json"):
             self.assertTrue(os.path.exists(os.path.join(self.data, "tls", name)))
         self.assertEqual(util.read_lock_info(self.data)["tls"], True)
+
+    def test_tls_init_and_serve_tls_produce_the_same_files(self) -> None:
+        from chatd import __main__ as cli
+
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            self.assertEqual(cli.main(["tls-init", "--data-dir", self.data]), 0, err.getvalue())
+        names = sorted(os.listdir(os.path.join(self.data, "tls")))
+        self.assertEqual(names, ["cert.pem", "key.pem", "meta.json"])
+        with open(os.path.join(self.data, "tls", "cert.pem"), "rb") as fh:
+            cert = fh.read()
+        server = self.boot(tls=True)  # the certificate from tls-init is current: serve --tls keeps it
+        self.assertTrue(server.cfg.tls)
+        self.assertEqual(sorted(os.listdir(os.path.join(self.data, "tls"))), names)
+        with open(os.path.join(self.data, "tls", "cert.pem"), "rb") as fh:
+            self.assertEqual(fh.read(), cert)
+        self.assertEqual(tlsutil.cert_fingerprint(self.data) in out.getvalue(), True)
 
     def test_plain_http_request_to_the_tls_port_is_rejected_cleanly(self) -> None:
         server = self.boot(tls=True)

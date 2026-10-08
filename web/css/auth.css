@@ -78,6 +78,7 @@
 }
 
 .auth-submit { margin-top: var(--sp-1); }
+.auth-submit:not(.btn-block) { align-self: flex-start; }
 .auth-submit .spinner { width: 16px; height: 16px; }
 
 .auth-aside { font-size: var(--fs-sm); text-align: center; }

@@ -3,8 +3,8 @@
 
 Installs, removes and controls the DeskTalk server as an operating-system service: a Windows Task Scheduler
 task (``DeskTalk``), a systemd unit (``desktalk``) or a launchd daemon (``com.desktalk.server``).
-Standard library only, Python >= 3.8. It imports nothing from ``chatd`` (it carries its own health probe, LAN
-discovery and TLS-leaf generation) and never imports ``sqlite3``.
+Standard library only, Python >= 3.8. It imports nothing from ``chatd`` (it carries its own health probe and LAN
+discovery; certificates are made by ``chatd tls-init``) and never imports ``sqlite3``.
 
     python service/install_service.py install   [--port N] [--host H] [--data-dir D] [--python PATH] ...
     python service/install_service.py uninstall [--keep-firewall]
@@ -17,7 +17,7 @@ Every mutating command honours ``--dry-run``: it prints each command and file an
 OS for any target OS (``--target``). Exit codes: 0 ok, 1 error, 2 usage / privilege / refused check, 3 health check
 failed; ``cli --`` returns the exit status of the ``chatd`` command it ran.
 
-Layout: pure generators and parsers first (Task XML, systemd unit, launchd plist, SDDL checks, openssl.cnf, state
+Layout: pure generators and parsers first (Task XML, systemd unit, launchd plist, SDDL checks, state
 diff; all unit-tested without touching the machine), then the dry-run aware execution context, the three platform
 backends behind one interface, the commands and finally ``main``.
 """
@@ -614,7 +614,7 @@ def validate_settings(s: Settings) -> None:
 
 
 # --------------------------------------------------------------------------------------------------------------------
-# Pure generators: server command line, Task Scheduler XML, systemd unit, launchd plist, openssl.cnf, firewall
+# Pure generators: server command line, Task Scheduler XML, systemd unit, launchd plist, firewall
 # --------------------------------------------------------------------------------------------------------------------
 
 
@@ -825,29 +825,6 @@ def launchd_plist(s: Settings) -> bytes:
         "HardResourceLimits": {"NumberOfFiles": 8192},
     }
     return plistlib.dumps(data, fmt=plistlib.FMT_XML, sort_keys=False)
-
-
-def openssl_config(hostname: str, addresses: Sequence[str]) -> str:
-    """The ``openssl.cnf`` of SPEC 5.7 (CA:FALSE, serverAuth EKU, SAN with the host, localhost and LAN IPs)."""
-    lines = [
-        "[req]",
-        "distinguished_name=dn",
-        "x509_extensions=v3",
-        "prompt=no",
-        "[dn]",
-        "CN=" + hostname[:64],
-        "[v3]",
-        "basicConstraints=critical,CA:FALSE",
-        "keyUsage=critical,digitalSignature,keyEncipherment",
-        "extendedKeyUsage=serverAuth",
-        "subjectAltName=@alt",
-        "[alt]",
-        "DNS.1=" + hostname,
-        "DNS.2=localhost",
-        "IP.1=127.0.0.1",
-    ]
-    lines += ["IP.%d=%s" % (index, ip) for index, ip in enumerate(addresses, start=2)]
-    return "\n".join(lines) + "\n"
 
 
 def netsh_add_rule(s: Settings) -> List[str]:
@@ -1443,117 +1420,6 @@ def _choose_interpreter(ctx: Context, explicit: Optional[str], saved: Optional[s
 
 
 # --------------------------------------------------------------------------------------------------------------------
-# TLS leaf certificate generated at install time (SPEC 5.7; the installer's own copy of the recipe)
-# --------------------------------------------------------------------------------------------------------------------
-
-OPENSSL_CANDIDATES = (
-    "C:\\Program Files\\Git\\mingw64\\bin\\openssl.exe",
-    "C:\\Program Files\\Git\\usr\\bin\\openssl.exe",
-    "/usr/bin/openssl",
-    "/opt/homebrew/bin/openssl",
-    "/usr/local/bin/openssl",
-)
-TLS_DAYS = 825
-
-
-def find_openssl(ctx: Context) -> Optional[str]:
-    """``openssl`` on PATH, else the fixed locations of SPEC 5.7 (a placeholder name for foreign dry-runs)."""
-    found = ctx.which("openssl")
-    if found:
-        return found
-    if ctx.foreign:
-        return "openssl"
-    for candidate in OPENSSL_CANDIDATES:
-        if os.path.isfile(candidate):
-            return candidate
-    return None
-
-
-def tls_hostname() -> str:
-    """The machine name when it is a safe DNS label sequence (it is written into openssl.cnf), else ``desktalk``."""
-    name = socket.gethostname().strip()
-    return name if re.match(r"^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$", name) else "desktalk"
-
-
-def tls_san_entries(hostname: str, addresses: Sequence[str]) -> List[str]:
-    """The SAN entries as stored in ``meta.json``: DNS names first, then IP literals, without duplicates."""
-    return _unique([hostname, "localhost", "127.0.0.1", *addresses])
-
-
-def tls_is_current(meta: Optional[Mapping[str, Any]], san: Sequence[str], now: float) -> bool:
-    """True when ``meta`` covers every wanted SAN entry and the certificate has at least 30 days left."""
-    if not meta:
-        return False
-    have = meta.get("san")
-    not_after = meta.get("not_after")
-    if not isinstance(have, list) or isinstance(not_after, bool) or not isinstance(not_after, (int, float)):
-        return False
-    return all(entry in have for entry in san) and not_after - now >= 30 * 86400
-
-
-def ensure_tls(ctx: Context, data_dir: str) -> None:
-    """Generate ``<data>/tls/{cert.pem,key.pem,meta.json}`` unless a current certificate already exists.
-
-    An existing key is reused and the old certificate is kept as ``cert.pem.old``. Failure aborts the install
-    (exit 1): the user asked for TLS, so silently serving plain HTTP would be wrong.
-    """
-    tls_dir = ctx.join(data_dir, "tls")
-    cert, key = ctx.join(tls_dir, "cert.pem"), ctx.join(tls_dir, "key.pem")
-    meta_path, cnf = ctx.join(tls_dir, "meta.json"), ctx.join(tls_dir, "openssl.cnf")
-    hostname = tls_hostname()
-    primary, others = ctx.lan_fn()
-    addresses = ([primary] if primary else []) + others
-    san = tls_san_entries(hostname, addresses)
-    have_files = ctx.exists(cert) and ctx.exists(key)
-    if have_files and tls_is_current(read_state(meta_path), san, time.time()):
-        ctx.say("TLS certificate in %s is current (covers %s)." % (tls_dir, ", ".join(san)))
-        return
-    exe = find_openssl(ctx)
-    if exe is None:
-        raise InstallerError(
-            "--tls needs the 'openssl' command to create a certificate, but none was found "
-            "(searched PATH and the Git for Windows / Homebrew / /usr locations). Install OpenSSL or omit --tls."
-        )
-    ctx.makedirs(tls_dir, 0o700)
-    ctx.write_file(cnf, openssl_config(hostname, addresses).encode("utf-8"), 0o600, openssl_config(hostname, addresses))
-    reuse_key = ctx.exists(key)
-    if ctx.exists(cert):
-        if ctx.dry_run:
-            ctx.show("keep the old certificate as %s.old" % cert)
-        else:
-            shutil.copy2(cert, cert + ".old")
-    if reuse_key:
-        command = [exe, "req", "-x509", "-key", key, "-sha256", "-days", str(TLS_DAYS), "-config", cnf, "-out", cert]
-    else:
-        command = [
-            exe, "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-sha256", "-days", str(TLS_DAYS),
-            "-config", cnf, "-keyout", key, "-out", cert,
-        ]  # fmt: skip
-    env = {k: v for k, v in ctx.env.items() if k.upper() != "OPENSSL_CONF"}
-    try:
-        result = ctx.run(command, env=env, timeout=120)
-        if result.dry:
-            return
-        if result.returncode != 0:
-            detail = (result.stderr.strip().splitlines() or ["no output"])[-1]
-            raise InstallerError("openssl could not create the certificate: %s" % detail)
-        try:
-            ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER).load_cert_chain(cert, key)
-        except (ssl.SSLError, OSError) as exc:
-            for path in (cert, key):
-                ctx.remove_file(path)
-            raise InstallerError("the generated certificate does not load (%s); TLS setup aborted" % exc)
-        created = time.time()
-        meta = {"san": san, "not_after": created + TLS_DAYS * 86400, "created": created}
-        ctx.write_file(meta_path, (json.dumps(meta, indent=2) + "\n").encode("utf-8"), 0o600)
-        if hasattr(os, "chmod"):
-            os.chmod(key, 0o600)
-        ctx.say("TLS certificate created for: %s" % ", ".join(san))
-    finally:
-        ctx.remove_file(cnf)
-
-
-# --------------------------------------------------------------------------------------------------------------------
 # Elevation and privilege messages (SPEC 10.1 "Privilege")
 # --------------------------------------------------------------------------------------------------------------------
 
@@ -1812,7 +1678,7 @@ class Backend(abc.ABC):
         """Create the data dir (and users/log dirs) with restrictive permissions, before the first start."""
 
     def finalize_permissions(self, s: Settings) -> None:  # noqa: B027 - optional hook, Windows ACLs inherit
-        """Fix ownership after files were created by root (TLS material); a no-op where ACL inheritance does it."""
+        """Fix ownership of what root created (the macOS log file); a no-op where ACL inheritance does it."""
 
     @abc.abstractmethod
     def verify_runtime(self, s: Settings) -> None:
@@ -2697,6 +2563,25 @@ def report_ready(ctx: Context, s: Settings, info: Mapping[str, Any], admin: Opti
         ctx.say("Admin account '%s' exists; sign in at %s" % (admin, local))
 
 
+def create_certificate(ctx: Context, backend: Backend, s: Settings) -> None:
+    """``--tls``: run ``chatd tls-init`` as the service identity (SPEC 10.1); the installer has no TLS code of its own.
+
+    ``tls-init`` needs no database and is idempotent (a valid certificate that covers every LAN address is kept), so
+    re-running ``install`` never invalidates what devices already trust.
+    """
+    argv, env = backend.chatd_command(s, ["tls-init", "--data-dir", s.data_dir])
+    result = ctx.run(argv, cwd=s.app_root, env=env, timeout=180)
+    if result.dry:
+        return
+    if result.returncode != 0:
+        detail = (result.stderr.strip() or result.stdout.strip() or "no output").splitlines()[-1]
+        raise InstallerError(
+            "TLS was requested but no certificate could be created (tls-init exit %d): %s" % (result.returncode, detail)
+        )
+    for line in result.stdout.strip().splitlines():
+        ctx.say(line)
+
+
 def read_password_stdin() -> str:
     """One line from stdin without its newline (``--password-stdin``)."""
     line = sys.stdin.readline().rstrip("\r\n")
@@ -2811,10 +2696,10 @@ def cmd_install(ctx: Context, backend: Backend, args: argparse.Namespace, raw: S
 
     backend.preflight(s, bool(args.harden), bool(args.force))
     backend.prepare(s)
-    if s.tls:
-        ensure_tls(ctx, s.data_dir)
     backend.finalize_permissions(s)
     backend.verify_runtime(s)
+    if s.tls:
+        create_certificate(ctx, backend, s)
     admin = first_admin_step(ctx, backend, s, args)
 
     previous = resolve_settings(ctx, backend, argparse.Namespace(), state, installing=False) if state else None

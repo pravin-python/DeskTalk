@@ -1,4 +1,4 @@
-"""WebSocket test client and the ``ChatSession`` helper of SPEC section 12 (shared by every suite that talks to a server).
+"""WebSocket test client and the ``ChatSession`` helper of SPEC section 12 (shared by every protocol suite).
 
 Layers
 ------
@@ -20,12 +20,12 @@ Sequence numbers
 Every JSON frame the server sends (``res`` and ``ev.*`` alike) gets the next number of ONE counter, the moment it
 arrives, starting with the socket's first frame.  ``mark()`` returns the number the NEXT frame will get, so
 ``wait_event(..., since=mark())`` sees only what arrives afterwards.  ``Frame.seq`` tells the order of an event relative
-to a ``res`` ("events before ``res``", SPEC 7.6(4)); the close of the socket takes a number too (``close_seq``), which is
-how "``ev.kicked`` precedes the 4001 close" is asserted.  Events are queued from the moment the socket opens, so events
-that precede ``res`` are never lost, and ``ev.ready`` is always the first one.
+to a ``res`` ("events before ``res``", SPEC 7.6(4)); the close of the socket takes a number too (``close_seq``),
+which is how "``ev.kicked`` precedes the 4001 close" is asserted.  Events are queued from the moment the socket
+opens, so events that precede ``res`` are never lost, and ``ev.ready`` is always the first one.
 
-``expect_none`` is the barrier of SPEC 7.6(4): it sends a ``ping`` and waits for its ``res``; everything that was enqueued
-for this connection before then has arrived, so a matching event after ``since`` is a real violation.  Every
+``expect_none`` is the barrier of SPEC 7.6(4): it sends a ``ping`` and waits for its ``res``; everything that was
+enqueued for this connection before then has arrived, so a matching event after ``since`` is a real violation.  Every
 "must NOT receive" assertion is written with it, never with ``time.sleep``.
 """
 
@@ -146,7 +146,7 @@ def fragment_frames(opcode: int, payload: bytes, sizes: Sequence[int], **options
     frames: List[bytes] = []
     start = 0
     for index, size in enumerate(sizes):
-        chunk = payload[start:start + size]
+        chunk = payload[start : start + size]
         start += size
         frames.append(encode_frame(opcode if index == 0 else OP_CONT, chunk, fin=False, **options))
     frames.append(encode_frame(opcode if not sizes else OP_CONT, payload[start:], fin=True, **options))
@@ -855,7 +855,7 @@ class ChatSession:
     def events_matching(
         self, name: Optional[str], pred: Optional[Callable[[Frame], bool]] = None, since: int = 0
     ) -> List[Frame]:
-        """Snapshot of every event named ``name`` (``None``/``"*"``: any) with ``seq >= since`` that satisfies ``pred``."""
+        """Snapshot of the events named ``name`` (``None``/``"*"``: any) with ``seq >= since`` satisfying ``pred``."""
         wanted = self._event_name(name)
         with self._cv:
             start = bisect.bisect_left(self._event_seqs, since)
@@ -884,11 +884,9 @@ class ChatSession:
                     raise ClientTimeout(self._explain("no event %r within %.1f s" % (name, timeout)))
                 self._cv.wait(remaining)
 
-    def _first_event(
-        self, name: Optional[str], pred: Optional[Callable[[Frame], bool]], since: int
-    ) -> Optional[Frame]:
+    def _first_event(self, name: Optional[str], pred: Optional[Callable[[Frame], bool]], since: int) -> Optional[Frame]:
         wanted = self._event_name(name)
-        for _, frame in self.events[bisect.bisect_left(self._event_seqs, since):]:
+        for _, frame in self.events[bisect.bisect_left(self._event_seqs, since) :]:
             if (wanted is None or frame.get("t") == wanted) and (pred is None or pred(frame)):
                 return frame
         return None
@@ -910,9 +908,16 @@ class ChatSession:
 
     def _explain(self, message: str) -> str:
         with self._cv:
-            tail = ["%s%s" % (f.get("t"), "(%s)" % f.get("id") if f.get("t") == "res" else "") for f in self.frames[-8:]]
+            tail = [
+                "%s%s" % (f.get("t"), "(%s)" % f.get("id") if f.get("t") == "res" else "") for f in self.frames[-8:]
+            ]
         code = self.ws.close_code if self.ws is not None else None
-        return "%s [%s; close_code=%s; last frames: %s]" % (message, self.name or "session", code, ", ".join(tail) or "none")
+        return "%s [%s; close_code=%s; last frames: %s]" % (
+            message,
+            self.name or "session",
+            code,
+            ", ".join(tail) or "none",
+        )
 
     # ---- closing -----------------------------------------------------------------------------------------------
 

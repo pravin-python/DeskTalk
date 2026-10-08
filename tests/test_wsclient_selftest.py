@@ -18,6 +18,7 @@ import threading
 import time
 import unittest
 from typing import Any, Dict, List, Optional, Set
+from unittest import mock
 
 try:  # `unittest discover -s tests -t .` imports this module as part of the `tests` package
     from . import harness, wsclient
@@ -47,8 +48,14 @@ class StubAuth:
         if not token.startswith("tok-") or not token[4:].isdigit():
             return None
         uid = int(token[4:])
-        return {"user_id": uid, "token_hash": "h%d" % uid, "ip": ip, "user_agent": user_agent,
-                "must_change_password": False, "reissue_cookie": False}
+        return {
+            "user_id": uid,
+            "token_hash": "h%d" % uid,
+            "ip": ip,
+            "user_agent": user_agent,
+            "must_change_password": False,
+            "reissue_cookie": False,
+        }
 
     def cookie_header(self, token: str, secure: bool, max_age: int) -> str:
         return "fc_session=%s; Path=/; HttpOnly; SameSite=Strict; Max-Age=%d" % (token, max_age)
@@ -155,8 +162,7 @@ class StubTransport:
 
     def __init__(self, test_limits: Optional[Dict[str, Any]] = None) -> None:
         self.tmp = tempfile.mkdtemp(prefix="dtk-wsclient-")
-        self.cfg = Config(host="127.0.0.1", port=0, data_dir=self.tmp, scrypt_n=1024,
-                          test_limits=test_limits or {})
+        self.cfg = Config(host="127.0.0.1", port=0, data_dir=self.tmp, scrypt_n=1024, test_limits=test_limits or {})
         self.hub = StubHub()
         self.auth = StubAuth()
         self.router = Router(self.cfg, None, auth_module=self.auth)
@@ -338,7 +344,7 @@ class HttpSideTests(TransportCase):
         self.assertEqual(echoed.json["headers"]["host"], "localhost:9")
         missing = s.post("/api/echo", {}, headers={"X-Requested-With": None})
         self.assertEqual((missing.status, missing.code), (403, "forbidden"))
-        self.assertEqual(s.post("/api/echo", {}, headers={"Host": None}).status, 400)
+        self.assertEqual(s.get("/healthz", headers={"Host": None}).status, 400)
 
     def test_logout_clears_the_cookie(self) -> None:
         s = self.session("carol", connect=False)
@@ -499,8 +505,10 @@ class FramingMisbehaviourTests(TransportCase):
 
     def test_lying_length_closes_1009_before_any_payload(self) -> None:
         self._expect_close(
-            lambda s: s.raw(wsclient.encode_frame(wsclient.OP_TEXT, b"", length_form="64", declared_length=1 << 63),
-                            ignore_errors=True),
+            lambda s: s.raw(
+                wsclient.encode_frame(wsclient.OP_TEXT, b"", length_form="64", declared_length=1 << 63),
+                ignore_errors=True,
+            ),
             1009,
         )
 
@@ -668,9 +676,40 @@ class HarnessBootTests(unittest.TestCase):
         self.assertEqual(h.anonymous().get("/healthz").status, 200)
         self.assertGreater(h.port, 0)
 
-    def test_stop_without_start_and_skip_reason(self) -> None:
+    def test_stop_without_start_does_nothing(self) -> None:
         harness.ServerHarness().stop()  # never started: nothing to do, nothing raised
         self.assertIsNone(harness.stack_problem(custom_hub=True))
+
+    def test_skip_reasons_of_a_missing_stack(self) -> None:
+        missing = ModuleNotFoundError("No module named 'chatd.hub'", name="chatd.hub")
+        with mock.patch.object(harness.importlib, "import_module", side_effect=missing):
+            self.assertIn("chatd/hub.py is not written yet", harness.stack_problem() or "")
+            self.assertIsNone(harness.stack_problem(custom_hub=True))  # stubs need neither hub nor api
+        broken = ModuleNotFoundError("No module named 'nothere'", name="nothere")
+        patched = mock.patch.object(harness.importlib, "import_module", side_effect=broken)
+        with patched, self.assertRaises(ModuleNotFoundError):  # a real import error is not a skip
+            harness.stack_problem()
+        with mock.patch("chatd.db.sqlite_problem", return_value="sqlite3 is too old"):
+            self.assertIn("no usable sqlite3", harness.stack_problem(custom_hub=True) or "")
+            with self.assertRaises(unittest.SkipTest):
+                harness.ServerHarness().start()
+
+
+class SeededAdminTests(unittest.TestCase):
+    """``seed_admin`` (``maintenance.create_admin`` before the server starts) needs no setup code."""
+
+    def test_seed_admin_then_login(self) -> None:
+        reason = harness.stack_problem()
+        if reason is not None:
+            self.skipTest(reason)
+        h = harness.ServerHarness()
+        self.addCleanup(h.stop)
+        h.seed_admin("boss2", harness.DEFAULT_PASSWORD, "Boss Two")
+        h.start()
+        self.assertFalse(h.anonymous().get("/api/info").json["needs_setup"])
+        self.assertNotIn("SETUP CODE", h.banner)
+        boss = h.login("boss2")
+        self.assertEqual(boss.ready["me"]["role"], "admin")
 
 
 class SetupFlowTests(harness.ServerTestCase):
@@ -679,6 +718,7 @@ class SetupFlowTests(harness.ServerTestCase):
     def test_first_admin_through_the_setup_code_flow(self) -> None:
         h = self.harness
         self.assertTrue(h.anonymous().get("/api/info").json["needs_setup"])
+        self.assertIn(h.setup_code(), h.banner)
         admin = h.create_admin()
         self.assertEqual(admin.ready["me"]["role"], "admin")
         self.assertEqual(admin.events[0][1]["t"], "ev.ready")
@@ -711,6 +751,12 @@ class RealHubFlowTests(harness.ServerTestCase):
         self.assertEqual(got["d"]["message"]["sender_id"], bob.user_id)
         eve = h.create_user(admin, h.unique("eve"))
         eve.expect_none("ev.message", lambda f: f["d"]["message"]["body"] == "hello")
+
+    def test_registration_with_the_join_code(self) -> None:
+        h = self.harness
+        carol = h.register(h.open_registration(self.admin), h.unique("carol"))
+        self.assertEqual(carol.ready["me"]["role"], "member")
+        self.assertTrue(carol.me["id"] > 0)
 
     def test_never_activated_user_has_no_session(self) -> None:
         h = self.harness

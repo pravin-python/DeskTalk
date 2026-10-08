@@ -289,7 +289,7 @@ export function mount(container, ctx) {
   /**
    * Draw one screen into the container.
    * @param {HTMLElement} card
-   * @param {Node[]} children
+   * @param {Array<Node|null>} children null entries are skipped
    */
   function paint(card, children) {
     for (const t of timers) clearInterval(t);
@@ -305,7 +305,7 @@ export function mount(container, ctx) {
         h('div.auth-brand', h('span.auth-logo', icon('chat', { size: 28 })), h('span.auth-ws.truncate', state.info.name || 'DeskTalk')),
         ...banners,
         card)));
-    for (const child of children) card.appendChild(child);
+    card.append(...children.filter(Boolean));
   }
 
   /** @param {() => void} fn a screen builder */

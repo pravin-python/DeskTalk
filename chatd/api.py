@@ -77,14 +77,6 @@ def _throttled(wait: float) -> HttpError:
     return _refuse("rate_limited", "too many attempts, wait a moment", retry_after=max(wait, 1.0))
 
 
-async def _body(req: Request) -> Dict[str, Any]:
-    """The JSON object of a request; a lone surrogate in it is ``400 bad_request`` ``invalid_text`` (SPEC 7.1)."""
-    body = await req.read_json()
-    if util.has_lone_surrogate(body):
-        raise _refuse("bad_request", "text is not valid", reason="invalid_text")
-    return body
-
-
 def _text(body: Dict[str, Any], name: str, limit: int = _NAME_MAX, required: bool = True) -> Optional[str]:
     value = body.get(name)
     if value is None and not required:
@@ -138,7 +130,7 @@ def register_routes(router: Router, hub: Any, db: Any, cfg: Config) -> None:
             raise _refuse("bad_join_code", "the join code is wrong")
 
     async def register(req: Request) -> Response:
-        body = await _body(req)
+        body = await req.read_json()
         ip = req.remote_addr
         raw_username = _text(body, "username")
         raw_display = _text(body, "display_name")
@@ -196,7 +188,7 @@ def register_routes(router: Router, hub: Any, db: Any, cfg: Config) -> None:
     # ---- POST /api/login -----------------------------------------------------------------------------------------
 
     async def login(req: Request) -> Response:
-        body = await _body(req)
+        body = await req.read_json()
         ip = req.remote_addr
         username = _text(body, "username")
         password = _text(body, "password", _PASSWORD_MAX)
@@ -269,7 +261,7 @@ def register_routes(router: Router, hub: Any, db: Any, cfg: Config) -> None:
     async def password(req: Request) -> Response:
         session = req.session
         assert session is not None
-        body = await _body(req)
+        body = await req.read_json()
         old_password = _text(body, "old_password", _PASSWORD_MAX)
         new_password = _text(body, "new_password", _PASSWORD_MAX)
         ip, user_id = req.remote_addr, session["user_id"]
@@ -286,7 +278,7 @@ def register_routes(router: Router, hub: Any, db: Any, cfg: Config) -> None:
         if not verified:
             auth.login_throttle.record_failure(ip, record["username"], "a")
             raise _refuse("forbidden", "the old password is wrong", reason="bad_old_password")
-        if auth.normalize_password(new_password) == auth.normalize_password(old_password):
+        if auth.same_password(old_password, new_password):
             raise _refuse("weak_password", "choose a different password", reason="same_as_old")
         problem = auth.check_password_policy(new_password, record["username"], record["display_name"])
         if problem is not None:
@@ -312,7 +304,7 @@ def register_routes(router: Router, hub: Any, db: Any, cfg: Config) -> None:
     async def revoke(req: Request) -> Response:
         session = req.session
         assert session is not None
-        body = await _body(req)
+        body = await req.read_json()
         user_id, current = session["user_id"], session["token_hash"]
         wanted_id, others = body.get("id"), body.get("all_others")
         if (wanted_id is None) == (others is None) or (others is not None and others is not True):

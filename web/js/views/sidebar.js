@@ -607,8 +607,11 @@ export function mount(container, ctx) {
     empty.hidden = chats.length > 0;
     if (!chats.length) {
       const t = emptyText();
-      empty.replaceChildren(h('p', t.title), t.hint ? h('p.muted', t.hint) : null,
-        store.chats().length === 0 ? h('button.btn.btn-primary', { type: 'button', onClick: () => newchat.open() }, 'New chat') : null);
+      empty.replaceChildren(...[
+        h('p', t.title),
+        t.hint ? h('p.muted', t.hint) : null,
+        store.chats().length === 0 ? h('button.btn.btn-primary', { type: 'button', onClick: () => newchat.open() }, 'New chat') : null,
+      ].filter(Boolean));
     }
   }
 

@@ -1,0 +1,130 @@
+/*
+ * composer.css - the message composer: text field, reply / edit bar, attachment tray, emoji panel, mention list,
+ * voice-note recorder and the offline / disabled notes. Tokens only (docs/ui-core-api.md section 12).
+ */
+
+.conv-composer { flex: none; }
+
+.composer {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel-2);
+  border-top: 1px solid var(--border);
+  padding-bottom: var(--safe-bottom);
+}
+
+.composer-note {
+  margin: 0;
+  padding: var(--sp-1) var(--sp-3);
+  background: var(--warning-soft);
+  color: var(--warning-text);
+  font-size: var(--fs-sm);
+  text-align: center;
+}
+.composer-disabled { margin: 0; padding: var(--sp-4); color: var(--text-secondary); text-align: center; }
+
+/* reply / edit bar */
+.composer-context {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: var(--sp-2) var(--sp-2) 0;
+  padding: var(--sp-1) var(--sp-1) var(--sp-1) var(--sp-3);
+  border-inline-start: 4px solid var(--accent);
+  border-radius: var(--r-sm);
+  background: var(--bg-panel);
+}
+.composer-context-icon { display: inline-flex; flex: none; color: var(--accent-text); }
+.composer-context-main { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; }
+.composer-context-title { font-size: var(--fs-sm); font-weight: 600; color: var(--accent-text); }
+.composer-context-title.me { color: var(--accent-text); }
+.composer-context-text { font-size: var(--fs-sm); color: var(--text-secondary); }
+
+/* attachment tray */
+.composer-tray { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); max-height: 180px; margin: var(--sp-2) var(--sp-2) 0; overflow-y: auto; }
+.composer-file-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  max-width: 260px;
+  padding: var(--sp-1) var(--sp-1) var(--sp-1) var(--sp-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-panel);
+}
+.composer-thumb { flex: none; width: 48px; height: 48px; border-radius: var(--r-sm); object-fit: cover; background: var(--bg-panel-2); }
+.composer-thumb.icon { display: inline-flex; align-items: center; justify-content: center; color: var(--text-secondary); }
+.composer-file-info { display: flex; flex-direction: column; min-width: 0; }
+.composer-file-name { font-size: var(--fs-sm); font-weight: 500; }
+.composer-file-size { font-size: var(--fs-xs); }
+.composer-asfile { display: flex; align-items: center; gap: var(--sp-2); flex-basis: 100%; font-size: var(--fs-sm); color: var(--text-secondary); }
+
+/* mention autocomplete (anchored above the composer, not at the caret) */
+.composer-mentions {
+  position: absolute;
+  left: var(--sp-2);
+  right: var(--sp-2);
+  bottom: 100%;
+  z-index: var(--z-menu);
+  max-height: min(280px, 40vh);
+  margin: 0 0 var(--sp-1);
+  padding: var(--sp-1);
+  overflow-y: auto;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-2);
+}
+.composer-mention { display: flex; align-items: center; gap: var(--sp-2); min-height: 44px; padding: var(--sp-1) var(--sp-2); border-radius: var(--r-sm); cursor: pointer; }
+.composer-mention:hover, .composer-mention.active { background: var(--bg-active); }
+.composer-mention-name { font-weight: 500; }
+.composer-mention-user { font-size: var(--fs-sm); }
+
+/* input row */
+.composer-row { display: flex; align-items: flex-end; gap: var(--sp-1); padding: var(--sp-2) max(var(--sp-2), var(--safe-right)) var(--sp-2) max(var(--sp-2), var(--safe-left)); }
+.composer-field { position: relative; display: flex; flex: 1 1 auto; min-width: 0; }
+.composer-input {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  max-height: min(9em, 40vh);
+  padding: 10px 16px;
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: var(--fs-md);
+  line-height: 1.35;
+  resize: none;
+  overflow-y: auto;
+  outline: none;
+}
+.composer-input::placeholder { color: var(--text-tertiary); opacity: 1; }
+.composer-input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.composer-counter { position: absolute; right: 14px; bottom: 2px; font-size: var(--fs-xs); color: var(--text-secondary); pointer-events: none; }
+.composer-counter.over { color: var(--danger); font-weight: 700; }
+.composer-btn { align-self: flex-end; }
+.composer-send {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  background: var(--accent);
+  color: var(--text-on-accent);
+}
+.composer-send:hover:not(:disabled) { background: var(--accent-hover); color: var(--text-on-accent); }
+.composer-send:disabled { opacity: 0.45; }
+
+/* hidden native file inputs (still clickable programmatically on every browser) */
+.composer-file { position: absolute; width: 1px; height: 1px; margin: 0; padding: 0; opacity: 0; overflow: hidden; pointer-events: none; }
+
+/* emoji panel (inline, so it works with the on-screen keyboard closed) */
+.composer-emoji { height: min(300px, 40vh); border-top: 1px solid var(--border); background: var(--bg-elevated); }
+
+/* voice-note recorder */
+.composer-recording { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) max(var(--sp-3), var(--safe-right)) var(--sp-2) max(var(--sp-3), var(--safe-left)); }
+.composer-rec-dot { flex: none; width: 12px; height: 12px; border-radius: 50%; background: var(--danger); animation: rec-pulse 1.2s ease-in-out infinite; }
+.composer-rec-time { font-variant-numeric: tabular-nums; font-weight: 600; }
+.composer-rec-label { flex: 1 1 auto; font-size: var(--fs-sm); }
+@keyframes rec-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }

@@ -1,4 +1,4 @@
-"""Pure generators of service/install_service.py: Task XML, systemd unit, launchd plist, openssl.cnf, commands.
+"""Pure generators of service/install_service.py: Task XML, systemd unit, launchd plist, commands.
 
 Nothing here touches the machine: every artefact is generated from fake settings and parsed back the way the
 operating system would parse it (SPEC 12 "the installer").
@@ -354,22 +354,7 @@ class QuotingCaseOnAllTargets(unittest.TestCase):
                 self.assertIn(data_dir, plist["ProgramArguments"])
 
 
-class OpensslAndCommandTests(unittest.TestCase):
-    def test_openssl_config(self) -> None:
-        text = inst.openssl_config("PC-01", ["192.168.1.5", "10.0.0.7"])
-        self.assertIn("basicConstraints=critical,CA:FALSE", text)
-        self.assertIn("extendedKeyUsage=serverAuth", text)
-        self.assertIn("keyUsage=critical,digitalSignature,keyEncipherment", text)
-        for line in (
-            "CN=PC-01",
-            "DNS.1=PC-01",
-            "DNS.2=localhost",
-            "IP.1=127.0.0.1",
-            "IP.2=192.168.1.5",
-            "IP.3=10.0.0.7",
-        ):
-            self.assertIn(line + "\n", text)
-
+class FirewallAndAclCommandTests(unittest.TestCase):
     def test_netsh_rule(self) -> None:
         s = make_settings(
             "windows", redirect_port=80, firewall={"port": 8765, "scope": "10.0.0.0/24", "profile": "private,domain"}

@@ -5,9 +5,8 @@
  * Exported API: icon(name, opts), ICON_NAMES, hasIcon(name)
  */
 
-// The SVG namespace URI is an identifier, not a network address; assembled from parts so that
-// the static check for external URLs has nothing to flag.
-const SVG_NS = 'http:' + '//www.w3.org/2000/svg';
+// The SVG namespace URI is an identifier (the UI lint allow-lists it), not a network address.
+const SVG_NS = 'http://www.w3.org/2000/svg';
 
 /** @type {Record<string, string|string[]>} */
 const PATHS = {

@@ -74,9 +74,7 @@ class DefaultsAndPrecedence(ConfigBase):
         cfg = load([], {})
         self.assertEqual(cfg.data_dir.name, "data")
         self.assertEqual(cfg.source("data_dir"), "default")
-        self.assertEqual(
-            load([], {"DESKTALK_DATA_DIR": self.tmp}).data_dir, Path(os.path.abspath(self.tmp))
-        )
+        self.assertEqual(load([], {"DESKTALK_DATA_DIR": self.tmp}).data_dir, Path(os.path.abspath(self.tmp)))
 
     def test_flags_beat_env_beat_file_beat_defaults(self) -> None:
         self.write_file({"port": 1111, "workspace_name": "From File", "max_upload_mb": 7, "host": "10.0.0.1"})
@@ -223,7 +221,9 @@ class Validation(ConfigBase):
         self.assertEqual(caught.exception.code, 2)
 
     def test_the_command_word_and_foreign_tokens_are_ignored(self) -> None:
-        cfg = load(["create-admin", "boss", "--password-stdin", "--out", "x", "--data-dir", self.tmp, "--port", "7"], {})
+        cfg = load(
+            ["create-admin", "boss", "--password-stdin", "--out", "x", "--data-dir", self.tmp, "--port", "7"], {}
+        )
         self.assertEqual((cfg.port, str(cfg.data_dir)), (7, os.path.abspath(self.tmp)))
         for command in ("serve", "doctor", "backup", "restore", "tls-init"):
             self.assertEqual(load([command, "--data-dir", self.tmp], {}).port, 8765)
@@ -330,7 +330,9 @@ class ConfigContract(ConfigBase):
         cfg = self.load(["--port", "1"], {"DESKTALK_NAME": "N"}, host="10.0.0.1")
         rows = {name: source for name, _value, source in cfg.describe()}
         self.assertEqual(set(cfg.sources) >= set(rows), True)
-        self.assertEqual((cfg.sources["port"], cfg.sources["workspace_name"], cfg.sources["host"]), ("flag", "env", "file"))
+        self.assertEqual(
+            (cfg.sources["port"], cfg.sources["workspace_name"], cfg.sources["host"]), ("flag", "env", "file")
+        )
         self.assertTrue(all(v in ("flag", "env", "file", "default") for v in cfg.sources.values()))
         self.assertEqual(cfg.sources["tls"], "default")
         self.assertEqual(Config().sources["port"], "default")
@@ -356,7 +358,9 @@ class ConfigContract(ConfigBase):
 
     def test_wildcard_limit_is_accepted(self) -> None:
         env = {"DESKTALK_TEST": "1"}
-        cfg = self.load(env=env, test_limits={"*": [100000, 1], "msg.send": [3, 1.0], "ws_handshakes_per_ip_min": 100000})
+        cfg = self.load(
+            env=env, test_limits={"*": [100000, 1], "msg.send": [3, 1.0], "ws_handshakes_per_ip_min": 100000}
+        )
         self.assertEqual(cfg.test_limits["*"], [100000, 1.0])
         self.assertEqual(cfg.test_limits.get("msg.react", cfg.test_limits["*"]), [100000, 1.0])
 

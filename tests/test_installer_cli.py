@@ -182,16 +182,12 @@ class Lab:
     def read_state(self, path: str) -> Optional[Dict[str, Any]]:
         return json.loads(self.files[path].decode("utf-8")) if path in self.files else None
 
-    def fake_tls(self, ctx: Any, data_dir: str) -> None:
-        self.events.append("tls: " + data_dir)
-
     @contextlib.contextmanager
     def patched(self, stdin: str = "") -> Iterator[None]:
         with contextlib.ExitStack() as stack:
             stack.enter_context(mock.patch.object(inst.subprocess, "run", self.fake_run))
             stack.enter_context(mock.patch.object(inst, "read_state", self.read_state))
             stack.enter_context(mock.patch.object(inst, "port_is_open", lambda host, port, timeout=1.0: self.port_open))
-            stack.enter_context(mock.patch.object(inst, "ensure_tls", self.fake_tls))
             stack.enter_context(mock.patch.object(inst, "STOP_WAIT_S", 0.0))
             stack.enter_context(mock.patch.object(inst, "STOP_RECHECK_S", 0.0))
             stack.enter_context(mock.patch.object(inst, "HEALTH_WAIT_S", 0.0))
@@ -360,7 +356,7 @@ class WindowsInstallTests(LabTestCase):
         self.assertEqual(lab.state()["name"], "Free Chat")  # not given again: taken from the state file
         self.assertEqual(lab.state()["python"], lab.paths["python"])
         self.assertTrue(lab.state()["tls"])
-        self.assertIn("tls: " + lab.paths["data"], lab.events)  # certificate generated before the task is created
+        self.assert_order(lab, "-m chatd tls-init --data-dir " + lab.paths["data"], "schtasks /Create")
 
     def test_reinstall_with_a_new_port_and_data_dir_stops_the_old_server_where_it_runs(self) -> None:
         lab = self.lab
@@ -509,13 +505,37 @@ class WindowsInstallTests(LabTestCase):
         self.assertIn("cli -- create-admin <username>", out)
         self.assertIn("Share this link: https://192.168.1.5:%d/" % lab.port, out)
 
-    def test_tls_option_generates_the_certificate_and_serves_https(self) -> None:
+    def test_tls_option_runs_tls_init_before_the_service_exists_and_serves_https(self) -> None:
         lab = self.lab
-        self.assertEqual(lab.invoke(lab.install_args("--tls"))[0], 0)
-        self.assert_order(lab, "tls: " + lab.paths["data"], "schtasks /Create")
-        self.assertNotIn("Plain HTTP", lab.invoke(lab.install_args("--tls"))[1])
+        lab.reply("tls-init", 0, "TLS certificate ready: C:\\x\\cert.pem\nSHA-256 fingerprint: AA:BB\n")
+        code, out = lab.invoke(lab.install_args("--tls"))
+        self.assertEqual(code, 0, out)
+        self.assert_order(lab, "mkdir: " + lab.paths["data"], "-m chatd tls-init --data-dir", "schtasks /Create")
+        run = lab.find_run("tls-init")
+        self.assertEqual(run["argv"][:6], [lab.paths["python"], "-X", "utf8", "-m", "chatd", "tls-init"])
+        self.assertEqual(run["cwd"], lab.paths["app"])
+        self.assertEqual(run["env"]["DESKTALK_TLS"], "1")  # the installed options reach the command
+        self.assertIn("SHA-256 fingerprint: AA:BB", out)  # what tls-init printed is shown
+        self.assertNotIn("Plain HTTP", out)
         task = ET.fromstring(lab.files["C:\\ProgramData\\DeskTalk\\DeskTalk.task.xml"])
         self.assertIn("--tls", task.findtext("%sActions/%sExec/%sArguments" % (NS, NS, NS)))
+        self.assertEqual(len([c for c in lab.commands() if "tls-init" in c]), 1)
+
+    def test_a_failing_tls_init_aborts_before_anything_is_registered(self) -> None:
+        lab = self.lab
+        lab.reply("tls-init", 1, "", "no certificate could be produced: openssl was not found")
+        code, out = lab.invoke(lab.install_args("--tls", "--admin", "bob", "--password-stdin"), PASSWORD + "\n")
+        self.assertEqual(code, 1)
+        self.assertIn("TLS was requested but no certificate could be created (tls-init exit 1)", out)
+        self.assertIn("openssl was not found", out)
+        for needle in ("create-admin", "schtasks /Create", "write: C:\\ProgramData\\DeskTalk\\install.json"):
+            self.assert_absent(lab, needle)
+
+    def test_without_tls_there_is_no_certificate_step(self) -> None:
+        lab = self.lab
+        for flag in ("--no-tls", "--allow-sleep"):
+            self.assertEqual(lab.invoke(lab.install_args(flag))[0], 0)
+        self.assert_absent(lab, "tls-init")
 
     def test_explicit_no_tls_silences_the_warning(self) -> None:
         lab = self.lab
@@ -850,6 +870,23 @@ class LinuxTests(LabTestCase):
         self.assertEqual(lab.state()["firewall"]["tool"], "ufw")
         self.assertEqual(lab.state()["user"], "desktalk")
         self.assertIn("HandleLidSwitch=ignore", out)
+
+    def test_tls_init_runs_as_the_service_user_after_the_runtime_check(self) -> None:
+        lab = self.lab
+        code, out = lab.invoke(lab.install_args("--tls", "--admin", "bob", "--password-stdin"), PASSWORD + "\n")
+        self.assertEqual(code, 0, out)
+        self.assert_order(
+            lab,
+            "install -d -o desktalk -g desktalk -m 0700 " + self.data,
+            "runuser -u desktalk -- test -w " + self.data,
+            "-m chatd tls-init --data-dir " + self.data,
+            "-m chatd create-admin bob",
+            "write: " + self.unit,
+        )
+        argv = lab.find_run("tls-init")["argv"]
+        self.assertEqual(argv[:5], ["runuser", "-u", "desktalk", "--", "env"])
+        self.assertIn("DESKTALK_TLS=1", argv)
+        self.assertEqual(argv[-5:], ["-m", "chatd", "tls-init", "--data-dir", self.data])
 
     def test_reinstall_restarts_and_moves_the_firewall_rule(self) -> None:
         lab = self.lab
@@ -1196,6 +1233,15 @@ class MacTests(LabTestCase):
         )
         self.assertIn("sudo rm -rf", out)
 
+    def test_tls_init_runs_through_sudo_as_the_service_user(self) -> None:
+        lab = self.lab
+        code, out = self.install("--tls")
+        self.assertEqual(code, 0, out)
+        argv = lab.find_run("tls-init")["argv"]
+        self.assertEqual(argv[:6], ["sudo", "-n", "-u", "alice", "--", "env"])
+        self.assertEqual(argv[-5:], ["-m", "chatd", "tls-init", "--data-dir", lab.paths["data"]])
+        self.assert_order(lab, "-c import chatd", "tls-init", "write: " + self.PLIST)
+
     def test_restart_of_an_unloaded_job_loads_it(self) -> None:
         lab = self.lab
         lab.reply("launchctl kickstart", 113, "", "Could not find service")
@@ -1307,6 +1353,17 @@ class DryRunTests(unittest.TestCase):
             "chown root:wheel",
         ):
             self.assertIn(needle, out)
+
+    def test_tls_dry_run_shows_tls_init_and_no_certificate_code(self) -> None:
+        for target in inst.TARGETS:
+            code, out, _err = self.dry_install(target, "--tls")
+            self.assertEqual(code, 0, target)
+            self.assertIn("-m chatd tls-init --data-dir", out)
+            if target != "windows":  # POSIX passes the installed options as `env K=V` on the command line
+                self.assertIn("DESKTALK_TLS=1", out)
+            self.assertNotIn("openssl", out.lower())
+            _code, plain, _err = self.dry_install(target, "--no-tls")
+            self.assertNotIn("tls-init", plain)
 
     def test_dry_run_never_executes_or_writes(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
@@ -1531,6 +1588,13 @@ class ScriptTests(unittest.TestCase):
             source = handle.read()
         self.assertIsNone(re.search(r"^\s*(from|import)\s+chatd\b", source, re.M))
         self.assertIsNone(re.search(r"^\s*(from|import)\s+sqlite3\b", source, re.M))
+
+    def test_contains_no_tls_code_of_its_own(self) -> None:
+        """SPEC 6.2 / 10.1: certificates are made by `chatd tls-init`, never by the installer."""
+        with open(SCRIPT, encoding="utf-8") as handle:
+            source = handle.read().lower()
+        for forbidden in ("openssl", "key.pem", "load_cert_chain", "-newkey", "subjectaltname"):
+            self.assertNotIn(forbidden, source)
 
 
 if __name__ == "__main__":

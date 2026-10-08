@@ -38,6 +38,7 @@ from typing import (
     AsyncIterator,
     Awaitable,
     Callable,
+    Coroutine,
     Deque,
     Dict,
     Iterable,
@@ -740,10 +741,10 @@ class Hub:
     # ==========================================================================================================
 
     def _spawn(
-        self, coro: Awaitable[Any], tracked: Optional[Set["asyncio.Task[Any]"]] = None, quiet: bool = False
+        self, coro: Coroutine[Any, Any, Any], tracked: Optional[Set["asyncio.Task[Any]"]] = None, quiet: bool = False
     ) -> "asyncio.Task[Any]":
         """Create a task that is referenced until done (the loop keeps only weak references)."""
-        task = asyncio.get_running_loop().create_task(coro)  # type: ignore[arg-type]
+        task = asyncio.get_running_loop().create_task(coro)
         (self._background if tracked is None else tracked).add(task)
 
         def done(finished: "asyncio.Task[Any]") -> None:
@@ -758,7 +759,7 @@ class Hub:
         task.add_done_callback(done)
         return task
 
-    def _launch(self, coro: Awaitable[Any]) -> "asyncio.Task[Any]":
+    def _launch(self, coro: Coroutine[Any, Any, Any]) -> "asyncio.Task[Any]":
         """A detached operation (SPEC 7.6(5)): tracked in ``_inflight``; its waiter awaits ``asyncio.shield`` of it."""
         return self._spawn(coro, self._inflight, quiet=True)
 
@@ -1111,8 +1112,7 @@ class Hub:
     ) -> None:
         """Run one request and answer it; every failure becomes a ``res`` (SPEC 7.1.1), never an exception."""
         try:
-            payload = await handler(conn, args)
-            frame = util.json_dumps({"t": "res", "id": rid, "ok": True, "d": payload}, ensure_ascii=False)
+            self._reply(conn, rid, await handler(conn, args))
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 - mapped to a res below; unexpected ones are logged with a traceback
@@ -1123,9 +1123,6 @@ class Hub:
             self._reply(conn, rid, err, False)
             if err["code"] == "unauthorized":
                 self._revoke_now(conn.user_id, "disabled")  # SPEC 7.1.1 (e): the account was disabled meanwhile
-            return
-        if rid is not None:
-            conn.ws.send_text(frame)
 
     @staticmethod
     def _error_of(exc: BaseException) -> Optional[Dict[str, Any]]:
@@ -1387,24 +1384,46 @@ class Hub:
     async def _guarded_search(self, conn: _Conn, fn: Callable[..., Any], *args: Any) -> Dict[str, Any]:
         """``msg.search`` / ``msg.shared`` (SPEC 2.3): one per user, one global, time-boxed, never queued for long."""
         uid = conn.user_id
-        sem = self._search_sem
-        assert sem is not None
         if uid in self._searching:
             raise _Fail("rate_limited", "a search is already running", retry_after=1.0)
         self._searching.add(uid)
         try:
-            try:
-                await asyncio.wait_for(sem.acquire(), util.scaled(SEARCH_WAIT_S))
-            except asyncio.TimeoutError:
+            if not await self._take_search_slot():
                 raise _Fail("server_busy", "searching is busy, retry shortly", retry_after=2.0)
             try:
                 return await self.db.run_read(fn, uid, *args, interrupt_after=util.scaled(SEARCH_BOX_S))
             except dbmod.ServerBusy:
                 raise _Fail("server_busy", "the search took too long, narrow it down", retry_after=2.0)
             finally:
-                sem.release()
+                assert self._search_sem is not None
+                self._search_sem.release()
         finally:
             self._searching.discard(uid)
+
+    async def _take_search_slot(self) -> bool:
+        """Acquire the global search semaphore, waiting at most 5 s; ``False`` on timeout.
+
+        Not ``wait_for(sem.acquire(), ...)``: when the timeout or a cancellation races with a successful acquire that
+        form can leak the permit, and a leaked permit would disable every later search.
+        """
+        sem = self._search_sem
+        assert sem is not None
+        waiter = asyncio.ensure_future(sem.acquire())
+        try:
+            await asyncio.wait({waiter}, timeout=util.scaled(SEARCH_WAIT_S))
+        except asyncio.CancelledError:
+            self._give_up(waiter, sem)
+            raise
+        if waiter.done() and not waiter.cancelled():
+            return True
+        self._give_up(waiter, sem)
+        return False
+
+    @staticmethod
+    def _give_up(waiter: "asyncio.Future[Any]", sem: "asyncio.Semaphore") -> None:
+        """Abandon a pending ``acquire``; hand the permit back when it was granted after all."""
+        if not waiter.cancel() and not waiter.cancelled() and waiter.exception() is None:
+            sem.release()
 
     # ==========================================================================================================
     # Request handlers: receipts, typing, profile
@@ -1575,6 +1594,8 @@ class Hub:
                     break
             ids = sorted(set(ids) | set(again))  # a group gained the target as admin meanwhile: lock it as well
         user = out["res"]["user"]
+        if k["disabled"] and not out["noop"]:
+            await self.db.run(db_users.revoke_user_sessions, target)  # re-enabling must not revive old cookies
         user["online"] = user["id"] in self._online
         return {"user": user}
 

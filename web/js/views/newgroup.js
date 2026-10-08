@@ -1,7 +1,7 @@
 /**
  * views/newgroup.js - the "New group" dialog (SPEC 9.2, 7.4 `chat.create_group`): group name,
  * optional description and the members. Opened from the sidebar menu and from the New chat dialog.
- * The members list is the target picker of views/forward.js (docs/ui-conv-api.md section 3).
+ * The members list is the multi-select `ui.peoplePicker` of core/ui.js.
  */
 
 import { h } from '../core/dom.js';
@@ -18,31 +18,21 @@ const DESCRIPTION_MAX = 500;
  * @returns {Promise<any|null>} the created chat (already in the store and open), or null when cancelled
  */
 export async function open() {
-  let forward;
-  try {
-    forward = await import('./forward.js');
-  } catch (err) {
-    console.error('[newgroup] the people picker could not be loaded', err);
-    ui.toast('The people list is not available right now.', { type: 'error' });
-    return null;
-  }
   const me = store.me;
   const maxMembers = Math.max(1, (store.limits.max_group_members || 200) - 1);
   const title = /** @type {HTMLInputElement} */ (h('input.input', {
-    id: 'ng-title', type: 'text', maxlength: TITLE_MAX * 2, autocomplete: 'off', dir: 'auto', placeholder: 'Group name', 'data-autofocus': '',
+    id: 'ng-title', type: 'text', maxlength: TITLE_MAX * 2, autocomplete: 'off', dir: 'auto', placeholder: 'Group name',
   }));
   const description = /** @type {HTMLTextAreaElement} */ (h('textarea.input', {
     id: 'ng-description', rows: 2, maxlength: DESCRIPTION_MAX * 2, dir: 'auto', placeholder: 'What is this group for? (optional)',
   }));
   const error = h('p.error-text', { role: 'alert', hidden: true });
   const count = h('p.hint.ng-count', { 'aria-live': 'polite' }, 'No members selected yet.');
-  const picker = forward.createTargetPicker({
-    people: true,
-    chats: false,
+  const picker = ui.peoplePicker({
+    multi: true,
     exclude: me ? [me.id] : [],
-    max: maxMembers,
-    onChange: (selection) => {
-      const n = selection ? selection.length : 0;
+    onPick: (_user, _on, all) => {
+      const n = all ? all.length : 0;
       count.textContent = n ? `${n} ${pluralize(n, 'member')} selected` : 'No members selected yet.';
     },
   });
@@ -75,10 +65,11 @@ export async function open() {
     error.hidden = true;
     const name = title.value.trim();
     const about = description.value.trim();
+    const memberIds = picker.getSelected().map((u) => u.id);
     if (!name) return fail('Give the group a name.', title);
     if (cpLength(name) > TITLE_MAX) return fail(`The name can have up to ${TITLE_MAX} characters.`, title);
     if (cpLength(about) > DESCRIPTION_MAX) return fail(`The description can have up to ${DESCRIPTION_MAX} characters.`, description);
-    const memberIds = picker.selection().filter((s) => s.kind === 'user').map((s) => s.id);
+    if (memberIds.length > maxMembers) return fail(`A group can have up to ${maxMembers + 1} members including you. Remove ${memberIds.length - maxMembers}.`, null);
     handle.setBusy(true);
     try {
       const body = { title: name, member_ids: memberIds };
@@ -98,6 +89,7 @@ export async function open() {
     size: 'md',
     className: 'dialog-people',
     content,
+    initialFocus: title,
     actions: [
       { label: 'Cancel', value: false },
       { label: 'Create group', primary: true, value: true, onClick: create },

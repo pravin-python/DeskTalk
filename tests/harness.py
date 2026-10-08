@@ -122,9 +122,7 @@ def build_config(
     os.makedirs(data_dir, exist_ok=True)
     with open(os.path.join(data_dir, "config.json"), "w", encoding="utf-8") as handle:
         json.dump(values, handle)
-    # SPEC 6.2 names the parser `config.load`; the transport module currently exposes it as `config_from_argv`.
-    loader = getattr(config, "load", None) or config.config_from_argv
-    cfg = loader(["--data-dir", data_dir, "--port", "0", "--host", "127.0.0.1"], env=server_env())
+    cfg = config.load(["serve", "--data-dir", data_dir, "--port", "0", "--host", "127.0.0.1"], env=server_env())
     if cfg.warnings:
         raise HarnessError("the test config produced warnings: %s" % "; ".join(cfg.warnings))
     return cfg
@@ -226,7 +224,8 @@ class ServerHarness:
     def stop(self, remove_data: bool = True) -> None:
         """Abort the sessions, stop the server, wait for it, remove the temp dir; fail on leaked server threads.
 
-        Safe to call twice and after a failed :meth:`start`.  ``remove_data=False`` keeps the data dir (:meth:`restart`).
+        Safe to call twice and after a failed :meth:`start`.  ``remove_data=False`` keeps the data dir (for
+        :meth:`restart`).
         """
         for session in self.sessions:
             session.abort()
@@ -251,7 +250,8 @@ class ServerHarness:
         deadline = time.monotonic() + timeout
         while True:
             alive = [
-                t.name for t in threading.enumerate()
+                t.name
+                for t in threading.enumerate()
                 if t.ident not in self._threads_before and t.name != "wsclient-reader" and t.is_alive()
             ]
             if not alive or time.monotonic() > deadline:
@@ -300,9 +300,9 @@ class ServerHarness:
 
     def create_admin(
         self,
-        username: str = "admin",
+        username: str = "boss",
         password: str = DEFAULT_PASSWORD,
-        display_name: str = "Admin",
+        display_name: str = "The Boss",
         connect: bool = True,
     ) -> wsclient.ChatSession:
         """The first admin through the REAL setup flow: read the setup code, ``POST /api/register``, connect."""
@@ -313,7 +313,9 @@ class ServerHarness:
             raise HarnessError("setup registration of %r failed: %r" % (username, response))
         return session.connect() if connect else session
 
-    def seed_admin(self, username: str = "admin", password: str = DEFAULT_PASSWORD, display_name: str = "Admin") -> None:
+    def seed_admin(
+        self, username: str = "boss", password: str = DEFAULT_PASSWORD, display_name: str = "The Boss"
+    ) -> None:
         """Create the first admin with ``maintenance.create_admin`` BEFORE :meth:`start` (no setup code is involved,
         the account is never-activated until its first login).  Needs the config, hence the data dir only."""
         from chatd import maintenance
@@ -370,7 +372,9 @@ class ServerHarness:
         session.password = password
         return session.connect() if connect else session
 
-    def create_users(self, admin: wsclient.ChatSession, count: int, stem: str = "user", **kwargs: Any) -> List[wsclient.ChatSession]:
+    def create_users(
+        self, admin: wsclient.ChatSession, count: int, stem: str = "user", **kwargs: Any
+    ) -> List[wsclient.ChatSession]:
         """``count`` activated, connected users named ``<stem><n>``."""
         return [self.create_user(admin, self.unique(stem), **kwargs) for _ in range(count)]
 
@@ -417,8 +421,6 @@ class ServerTestCase(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         super().setUpClass()
-        cls.harness = ServerHarness(
-            cls.test_limits, cls.test_scale, cls.settings, cls.hub_factory, cls.routes_factory
-        )
+        cls.harness = ServerHarness(cls.test_limits, cls.test_scale, cls.settings, cls.hub_factory, cls.routes_factory)
         cls.addClassCleanup(cls.harness.stop)
         cls.harness.start()

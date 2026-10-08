@@ -84,6 +84,8 @@ desktalk/
   docs/DB_API.md                 written by db-core owner: the `Database`/`db.py` facade function table (users/sessions/admin/files/maintenance parts) and ONLY the `auth.py` password/session/throttle functions that `api.py` calls (§6.2)   [db-core]
   docs/DB_API_chat.md            written by db-chat owner (chats/messages/receipts/ready function table used by the hub)   [db-chat]
   docs/ui-core-api.md            exported API of store/socket/outbox/upload/api/notify/ui (one line per function)   [ui-core]
+  docs/ui-shell-api.md           what ui-conv may call in the shell views (signatures)   [ui-shell]
+  docs/ui-conv-api.md            exports of messageview/richtext/emoji/forward/lightbox used by the shell views   [ui-conv]
   chatd/                         ← python server package  (python -m chatd)
     __init__.py                  version string only                                       [transport]
     __main__.py                  argparse, `preflight()` + boot-log wrapper (§2.2), `serve`, dispatch to maintenance/doctor/tlsutil ONLY (no SQL; the only check is the preflight)   [transport]
@@ -122,6 +124,10 @@ desktalk/
   legacy/                        old Tkinter/line-JSON chat, its package, its tests and its packaging files (moved there by the orchestrator in step 0, below)
   server.py                      thin wrapper (created by the orchestrator): `sys.path.insert(0, dirname(abspath(__file__)))` then
                                  `from chatd.__main__ import main`. Services run `python -X utf8 -I server.py serve …` (isolated mode, §10.1).
+  pyproject.toml                 packaging metadata + ruff config   [orchestrator]
+  .editorconfig                  editor rules (utf-8, LF, indentation)   [orchestrator]
+  .gitattributes                 line-ending normalisation (`* text=auto eol=lf`)   [orchestrator]
+  requirements.txt               comment-only: the server is standard-library-only   [orchestrator]
   .gitignore                     the orchestrator adds NOW: `data/`, `*.db`, `*.db-wal`, `*.db-shm`, `*.pem`, `setup_code.txt`, `backups/`, `__pycache__/`
 ```
 Owners edit **only** the files they own. Cross-owner changes go through the orchestrator. **Every file in the repository has exactly one owner** (a bracketed tag above, or: `docs/SPEC.md` = the spec owner, `docs/DB_API.md` = the db owner, `server.py`, `.gitignore` and `legacy/` = the orchestrator); `tests/test_layout.py` fails when `chatd/` contains a `.py` file that is not listed in this section (the four `db_*.py` modules above are the only db modules) and when the repository root holds a top-level entry that this section does not list (allowed extras: `.git`, `.gitignore`, `legacy`, `data`, `__pycache__`, an optional `pyproject.toml`).
@@ -1354,5 +1360,6 @@ showing the certificate fingerprint in the UI. The protocol leaves room (`ev.*` 
     * **Tests (§12).** `ChatSession` API fixed (`request/send/events/mark/wait_event/expect_none/raw/close_code/auto_pong`); the `Server` helper's default `test_limits` (wildcard `"*"` bucket key, handshake caps, login/registration limits) and per-suite overrides; round-3 test list.
     * **Reviewer proposals adapted (reasons).** The reviewers' `FREECHAT_*`/`load_config`/`freechat/` names were mapped to this spec's `DESKTALK_*`, `config.load` and the actual legacy package; `Chat.last_message` is replaced by `ev.chat_update` (always) and only protected from older snapshots in `res{chat}` (a blanket "unless the held one has a greater id" would keep a message that delete-for-me just removed); `msg.forward` sources are checked in ascending id order (the creation order) rather than request order; the two overlapping `msg.forward` order findings were merged into one order; `ev.receipt` became a third frame class instead of being declared durable (keeps its coalescing).
 * v5 — installer findings: icacls dumps are UTF-16LE without BOM (§10.2); absolute `systemd-inhibit` path and `$`/`%` escaping scope (§10.3). No behavioural change to the server.
-* v6 — transport findings: `range_not_satisfiable` (416) added to the REST error table (§4.2); header/body timeouts answer `400 bad_request` then close (no 408 code).
+* v6 — transport findings: `range_not_satisfiable` (416) added to the REST error table (§4.2). (An earlier draft of this line said header/body timeouts answer 400; superseded by round 3: they answer `408 request_timeout`.)
 * v7 — §9.8 supported-browser floors corrected to the versions that implement `dvh` (the mandated feature gate): Chrome/Edge 108, Firefox 101.
+* v8 — §1 lists the repository-level tooling files (`pyproject.toml`, `.editorconfig`, `.gitattributes`, `requirements.txt`) and the two UI API docs (`docs/ui-shell-api.md`, `docs/ui-conv-api.md`) so `test_layout.py` passes; no behavioural change.

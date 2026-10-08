@@ -2,8 +2,8 @@
  * lib/richtext.js - WhatsApp-style rich text (SPEC 9.3), produced as DOM nodes, never as HTML strings.
  *
  * Supported: *bold*, _italic_, ~strike~, `mono`, ```block```, "> quote" lines, "- " and "1. " lists,
- * auto-linked http(s) URLs, @mention chips (resolved with the greedy-then-trim rule of SPEC 7.4, matched
- * WITHOUT regex lookbehind), search highlighting and emoji-only detection.
+ * auto-linked http(s) URLs, @mention chips (`util.findMentions`: the greedy-then-trim rule of SPEC 7.4,
+ * matched WITHOUT regex lookbehind), search highlighting and emoji-only detection.
  *
  * All scanning is linear (or n log n) in the input length: URLs are found with one sticky pass, format
  * markers are matched through pre-computed closer lists, nesting is capped. The pure parts
@@ -14,6 +14,7 @@
  */
 
 import { h, text as textNode } from '../core/dom.js';
+import { findMentions } from '../core/util.js';
 
 /** Marker characters of the inline formats. */
 const MARKERS = '*_~`';
@@ -23,7 +24,6 @@ const MAX_DEPTH = 3;
 const MAX_URL_LENGTH = 2048;
 const MAX_HIGHLIGHTS = 50;
 const URL_START = /https?:\/\//gi;
-const MENTION = /(^|[^A-Za-z0-9._-])@([A-Za-z0-9._-]{3,32})/g;
 const WORD = /[\p{L}\p{N}\u0000]/u;
 const TRAILING_URL_CHARS = ".,;:!?'\")]}>*_~`";
 
@@ -136,28 +136,13 @@ function extractAtoms(line, resolve) {
       work += gap;
       return;
     }
-    MENTION.lastIndex = 0;
     let last = 0;
-    let m;
-    while ((m = MENTION.exec(gap)) !== null) {
-      let name = m[2];
-      let found = null;
-      while (name.length >= 3) {
-        found = resolve(name);
-        if (found) break;
-        const tail = name[name.length - 1];
-        if (tail === '.' || tail === '-') name = name.slice(0, -1);
-        else break;
-      }
-      const tokenStart = m.index + m[1].length;
-      if (!found) {
-        MENTION.lastIndex = tokenStart + 1;
-        continue;
-      }
-      work += gap.slice(last, tokenStart) + ATOM;
-      atoms.push({ raw: `@${name}`, node: { t: 'mention', v: found.name, user_id: found.user_id, self: Boolean(found.self) } });
-      last = tokenStart + 1 + name.length;
-      MENTION.lastIndex = last;
+    for (const token of findMentions(gap, (username) => resolve(username) !== null)) {
+      const found = resolve(token.username);
+      if (!found) continue;
+      work += gap.slice(last, token.start) + ATOM;
+      atoms.push({ raw: gap.slice(token.start, token.end), node: { t: 'mention', v: found.name, user_id: found.user_id, self: Boolean(found.self) } });
+      last = token.end;
     }
     work += gap.slice(last);
   };

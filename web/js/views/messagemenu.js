@@ -16,6 +16,20 @@ import { userAvatar } from '../core/avatar.js';
 import { QUICK_REACTIONS, openEmojiPicker } from '../lib/emoji.js';
 import { openForward } from './forward.js';
 
+/** Milliseconds to wait after a menu closed before an action may open another layer (see afterMenuClose). */
+const LAYER_SETTLE_MS = 150;
+
+/**
+ * Run `fn` once the history entry of the menu that was just closed has been popped. A layer that is released
+ * calls `history.back()` asynchronously; pushing the next layer's entry before that traversal finished makes the
+ * browser drop it and leaves the router one entry short (the hash would leave the chat). Used by every action
+ * that opens a dialog, the composer's reply/edit bar, the drawer or the emoji picker straight after a menu.
+ * @param {() => void} fn
+ */
+export function afterMenuClose(fn) {
+  setTimeout(fn, LAYER_SETTLE_MS);
+}
+
 /**
  * Show a failed request as a toast.
  * @param {any} err
@@ -29,15 +43,17 @@ function failed(err, fallback) {
  * Set my single reaction to `emoji`, or remove it when it already is my reaction (SPEC 7.4 SET semantics).
  * @param {any} message
  * @param {string} emoji
- * @returns {Promise<void>}
+ * @returns {Promise<any>} the updated message, or undefined after an error (already toasted)
  */
 export async function reactTo(message, emoji) {
   const meId = store.me ? store.me.id : -1;
   const mine = (message.reactions || []).find((r) => r.user_ids.includes(meId));
   try {
-    await store.request('msg.react', { message_id: message.id, emoji: mine && mine.emoji === emoji ? null : emoji });
+    const res = await store.request('msg.react', { message_id: message.id, emoji: mine && mine.emoji === emoji ? null : emoji });
+    return res.message;
   } catch (err) {
     failed(err, 'Could not react to the message.');
+    return undefined;
   }
 }
 
@@ -60,7 +76,7 @@ function rightsOf(message, chat) {
  * Ask how to delete a message and do it.
  * @param {any} message
  * @param {boolean} everyoneAllowed
- * @returns {Promise<void>}
+ * @returns {Promise<any>} the updated message (null when it was only hidden), undefined when cancelled or failed
  */
 async function deleteMessage(message, everyoneAllowed) {
   const actions = [{ label: 'Cancel', value: 'cancel', id: 'cancel' }, { label: 'Delete for me', value: 'me', id: 'me' }];
@@ -74,39 +90,45 @@ async function deleteMessage(message, everyoneAllowed) {
     initialFocus: '[data-action="cancel"]',
   });
   const scope = await handle.closed;
-  if (scope !== 'me' && scope !== 'everyone') return;
+  if (scope !== 'me' && scope !== 'everyone') return undefined;
   try {
-    await store.request('msg.delete', { message_id: message.id, scope });
+    const res = await store.request('msg.delete', { message_id: message.id, scope });
+    return res.message || null;
   } catch (err) {
     failed(err, 'Could not delete the message.');
+    return undefined;
   }
 }
 
 /**
  * @param {any} message
- * @returns {Promise<void>}
+ * @returns {Promise<any>} the updated message, or undefined after an error
  */
 async function toggleStar(message) {
   try {
-    await store.request('msg.star', { message_id: message.id, starred: !message.starred });
+    const res = await store.request('msg.star', { message_id: message.id, starred: !message.starred });
+    return res.message;
   } catch (err) {
     failed(err, 'Could not update the star.');
+    return undefined;
   }
 }
 
 /**
  * @param {any} message
- * @returns {Promise<void>}
+ * @returns {Promise<any>} the message with its new pin flag, or undefined after an error
  */
 async function togglePin(message) {
   try {
     await store.request('msg.pin', { chat_id: message.chat_id, message_id: message.id, pinned: !message.pinned });
+    return { ...message, pinned: !message.pinned };
   } catch (err) {
     if (err && err.code === 'invalid_state' && !message.pinned) {
       ui.toast(`You can pin up to ${store.limits.max_pinned_messages} messages in a chat. Unpin one first.`, { type: 'error', key: 'pin-limit' });
     } else {
       failed(err, 'Could not update the pin.');
     }
+    return undefined;
   }
 }
 
@@ -127,10 +149,14 @@ async function copyBody(body) {
  * Menu entries for a message.
  * @param {any} message
  * @param {any} chat
- * @param {{context?: string, onReply?: Function, onEdit?: Function, onGoTo?: Function, onSelectMode?: Function}} opts
+ * @param {{context?: string, onReply?: Function, onEdit?: Function, onGoTo?: Function, onSelectMode?: Function, onChanged?: Function}} opts
  * @returns {Array<{label: string, icon: string, danger?: boolean, onSelect: () => void}>}
  */
 function menuItems(message, chat, opts) {
+  /** Report a finished mutation (undefined = failed or cancelled). */
+  const changed = (promise) => promise.then((result) => {
+    if (result !== undefined && opts.onChanged) opts.onChanged(result);
+  });
   const { own, canEdit, canDeleteAll } = rightsOf(message, chat);
   const deleted = Boolean(message.deleted);
   const canPost = chat ? store.canPost(chat) : { ok: false };
@@ -139,12 +165,12 @@ function menuItems(message, chat, opts) {
   if (opts.context === 'chat' && opts.onReply && !deleted && canPost.ok) items.push({ label: 'Reply', icon: 'reply', onSelect: () => opts.onReply(message) });
   if (!deleted && String(message.body || '').trim() !== '') items.push({ label: 'Copy', icon: 'copy', onSelect: () => copyBody(message.body) });
   if (!deleted) items.push({ label: 'Forward', icon: 'forward', onSelect: () => openForward({ messages: [message], fromChatId: message.chat_id }) });
-  if (!deleted) items.push({ label: message.starred ? 'Unstar' : 'Star', icon: message.starred ? 'star' : 'star-outline', onSelect: () => toggleStar(message) });
-  if (!deleted && canPost.ok && chat) items.push({ label: message.pinned ? 'Unpin' : 'Pin', icon: 'pin', onSelect: () => togglePin(message) });
+  if (!deleted) items.push({ label: message.starred ? 'Unstar' : 'Star', icon: message.starred ? 'star' : 'star-outline', onSelect: () => changed(toggleStar(message)) });
+  if (!deleted && canPost.ok && chat) items.push({ label: message.pinned ? 'Unpin' : 'Pin', icon: 'pin', onSelect: () => changed(togglePin(message)) });
   if (own && !deleted && chat && !store.isSelfChat(chat)) items.push({ label: 'Info', icon: 'info', onSelect: () => openMessageInfo(message, chat) });
   if (opts.context === 'chat' && opts.onEdit && canEdit && canPost.ok) items.push({ label: 'Edit', icon: 'edit', onSelect: () => opts.onEdit(message) });
   if (opts.onSelectMode) items.push({ label: 'Select', icon: 'check-circle', onSelect: () => opts.onSelectMode() });
-  items.push({ label: 'Delete', icon: 'trash', danger: true, onSelect: () => deleteMessage(message, canDeleteAll) });
+  items.push({ label: 'Delete', icon: 'trash', danger: true, onSelect: () => changed(deleteMessage(message, canDeleteAll)) });
   return items;
 }
 
@@ -153,7 +179,7 @@ function menuItems(message, chat, opts) {
  * @param {any} message a held Message (not a system message)
  * @param {{context?: 'chat'|'starred'|'pinned', anchor?: Element, x?: number, y?: number, chat?: any,
  *          onReply?: (m: any) => void, onEdit?: (m: any) => void, onGoTo?: (m: any) => void,
- *          onSelectMode?: () => void}} [opts]
+ *          onSelectMode?: () => void, onChanged?: (message: any|null) => void}} [opts]
  * @returns {{close: () => void}}
  */
 export function openMessageMenu(message, opts = {}) {
@@ -173,7 +199,7 @@ export function openMessageMenu(message, opts = {}) {
         'aria-label': `React with ${e}`,
         onClick: () => {
           close();
-          reactTo(message, e);
+          reactTo(message, e).then((m) => m !== undefined && opts.onChanged && opts.onChanged(m));
         },
       }, e)),
       h('button.msgmenu-react.more', {
@@ -182,7 +208,7 @@ export function openMessageMenu(message, opts = {}) {
         onClick: (ev) => {
           const r = /** @type {HTMLElement} */ (ev.currentTarget).getBoundingClientRect();
           close();
-          openEmojiPicker({ x: r.left, y: r.bottom, onPick: (e) => reactTo(message, e) });
+          afterMenuClose(() => openEmojiPicker({ x: r.left, y: r.bottom, onPick: (e) => reactTo(message, e).then((m) => m !== undefined && opts.onChanged && opts.onChanged(m)) }));
         },
       }, icon('plus', { size: 20 })))
     : null;
@@ -193,7 +219,7 @@ export function openMessageMenu(message, opts = {}) {
       role: 'menuitem',
       onClick: () => {
         close();
-        it.onSelect();
+        afterMenuClose(it.onSelect);
       },
     }, h('span.menu-icon', icon(it.icon, { size: 20 })), h('span.menu-label', it.label)))));
   const content = h('div.msgmenu', quick, list);

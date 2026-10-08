@@ -795,6 +795,7 @@ export function peoplePicker(opts = {}) {
       const mine = Boolean(store.me && u.id === store.me.id);
       const btn = h('button.list-row.people-row', {
         type: 'button', role: 'option', 'aria-selected': String(selected.has(u.id)), dataset: { userId: u.id },
+        'aria-label': `${mine ? `${u.display_name} (You)` : u.display_name}, @${u.username}`,
         onClick: () => pick(u),
       }, userAvatar(u, { size: 'md' }),
       h('div.grow', h('div.truncate.people-name', { dir: 'auto' }, mine ? `${u.display_name} (You)` : u.display_name), h('div.truncate.muted.people-username', `@${u.username}`)),

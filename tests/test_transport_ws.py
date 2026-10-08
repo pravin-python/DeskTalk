@@ -315,6 +315,73 @@ class SendPathTests(WsBase):
         got = [client.recv_text() for _ in range(5)]
         self.assertEqual(got, ["D1", "D2", "t2", "p1", "loose"])
 
+    def test_keyed_frames_coalesce_in_the_send_queue_and_move_to_the_tail(self) -> None:
+        def on_connect(ws: Any) -> None:
+            ws.send_text("r1", durable=True, key=("receipt", 1, 2))
+            ws.send_text("D1")
+            ws.send_text("r2", durable=True, key=("receipt", 1, 2))
+            ws.send_text("other", durable=True, key=("receipt", 1, 3))
+
+        self.hub.on_connect = on_connect
+        client = self.connect()
+        self.assertEqual([client.recv_text() for _ in range(3)], ["D1", "r2", "other"])
+
+    def test_keyed_frames_are_never_dropped_but_ephemeral_ones_are_counted(self) -> None:
+        def on_connect(ws: Any) -> None:
+            assert ws.counters is self.hub.counters
+            for i in range(300):
+                ws.send_text("e%d" % i, durable=False, key=("typing", i))
+            for i in range(100):
+                ws.send_text("k%d" % i, durable=True, key=("receipt", i))
+            ws.send_text("last")
+
+        self.hub.on_connect = on_connect
+        client = self.connect()
+        got = []
+        while True:
+            got.append(client.recv_text())
+            if got[-1] == "last":
+                break
+        keyed = [t for t in got if t.startswith("k")]
+        self.assertEqual(keyed, ["k%d" % i for i in range(100)])
+        dropped = self.hub.counters["dropped_ephemeral"]
+        self.assertGreater(dropped, 0)
+        self.assertEqual(len([t for t in got if t.startswith("e")]) + dropped, 300)
+
+    def test_keyed_frames_count_as_durable_for_the_512_frame_limit(self) -> None:
+        def on_connect(ws: Any) -> None:
+            for i in range(600):
+                ws.send_text("k%d" % i, durable=True, key=("receipt", i))
+
+        self.hub.on_connect = on_connect
+        self.assertEqual(self.connect().recv_close(), 1013)
+
+    def test_flush_codes_deliver_queued_frames_first(self) -> None:
+        for code in (1000, 1001, 4001, 4003, 4008):
+            self.hub.on_connect = lambda ws: (ws.send_text("one"), ws.send_text("two"), ws.close(code, "bye"))
+            client = self.connect()
+            self.assertEqual((client.recv_text(), client.recv_text()), ("one", "two"), code)
+            self.assertEqual(client.recv_close(), code)
+
+    def test_protocol_and_backpressure_codes_close_at_once_and_discard_the_queue(self) -> None:
+        for code in (1002, 1003, 1007, 1008, 1009, 1013):
+            self.hub.on_connect = lambda ws: (ws.send_text("one"), ws.send_text("two"), ws.close(code, "no"))
+            client = self.connect()
+            opcode, payload = client.recv_frame()
+            self.assertEqual(opcode, 0x8, code)
+            self.assertEqual(int.from_bytes(payload[:2], "big"), code)
+
+    def test_flush_is_bounded_by_two_seconds(self) -> None:
+        def on_connect(ws: Any) -> None:
+            ws.send_text("stuck")
+            ws.close(4001, "kicked")
+            self.assertIsNotNone(ws._flush_timer)
+            ws._flush_expired()  # what the timer does after 2 s
+
+        self.hub.on_connect = on_connect
+        client = self.connect()
+        self.assertEqual(client.recv_close(), 4001)
+
     def test_durable_overflow_closes_with_1013(self) -> None:
         def on_connect(ws: Any) -> None:
             for i in range(600):

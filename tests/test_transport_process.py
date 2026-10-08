@@ -31,6 +31,11 @@ hub = types.ModuleType("chatd.hub")
 class Hub:
     def __init__(self, db, cfg):
         self.stopping = False
+        self.counters = {"external_change_calls": 0, "revalidate_calls": 0, "dropped_ephemeral": 0}
+    async def start(self):
+        pass
+    def sweep_typing(self):
+        pass
     async def serve(self, ws, session):
         while await ws.recv() is not None:
             pass

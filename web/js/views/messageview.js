@@ -879,11 +879,11 @@ function toggleExpanded(button) {
 /**
  * Starred-list item (docs/ui-conv-api.md section 1).
  * @param {any} message
- * @param {{onOpen?: (message: any) => void, showChat?: boolean}} [opts]
+ * @param {{onOpen?: (message: any) => void, showChat?: boolean, onChanged?: (message: any|null) => void}} [opts]
  * @returns {{el: HTMLElement, update: (message: any) => void, destroy: () => void}}
  */
 export function createMessageCard(message, opts = {}) {
-  const { onOpen, showChat = true } = opts;
+  const { onOpen, showChat = true, onChanged } = opts;
   let current = message;
   const env = /** @type {ViewEnv} */ ({ context: 'card', getChat: () => store.getChat(current.chat_id) });
   let row = createRow(current, env);
@@ -911,6 +911,7 @@ export function createMessageCard(message, opts = {}) {
       x: point ? point.x : undefined,
       y: point ? point.y : undefined,
       onGoTo: open,
+      onChanged,
     });
   };
   const unbind = bindMessageActions(el, {
@@ -922,7 +923,7 @@ export function createMessageCard(message, opts = {}) {
       if (item) openLightbox({ items: [item], index: 0 });
     },
     onReact: (m, emoji) => {
-      reactTo(m, emoji);
+      reactTo(m, emoji).then((updated) => updated !== undefined && onChanged && onChanged(updated));
     },
   });
   more.addEventListener('click', () => showMenu({ message: current }, more));

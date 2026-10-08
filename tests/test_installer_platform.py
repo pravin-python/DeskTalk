@@ -1,7 +1,7 @@
-"""Interpreter discovery, health probe, LAN discovery, TLS leaf generation and elevation of service/install_service.py.
+"""Interpreter discovery, health probe, LAN discovery and elevation of service/install_service.py.
 
 Everything runs against fakes or a throw-away temp dir: no service, task, firewall rule or registry key is touched
-(the registry is a dictionary, openssl only writes into a temp dir, ShellExecuteExW is replaced by a fake).
+(the registry is a dictionary, ShellExecuteExW is replaced by a fake).
 """
 
 from __future__ import annotations
@@ -618,96 +618,17 @@ class LanAddressTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------------------------------------------------
-# TLS leaf certificate (SPEC 5.7) with the real openssl, inside a temp dir
+# HTTPS health probe (the certificate comes from the server's own tlsutil: the installer has no TLS code)
 # ---------------------------------------------------------------------------------------------------------------------
 
 
-def real_context(dry_run: bool = False) -> Any:
-    ctx = inst.Context(inst.detect_host(), dry_run=dry_run, env=dict(os.environ), interactive=False)
-    ctx.lan_fn = lambda: ("192.168.77.5", ["10.77.0.9"])
-    return ctx
+class HttpsProbeTests(unittest.TestCase):
+    def test_probe_over_https_with_a_self_signed_certificate(self) -> None:
+        from chatd import tlsutil
 
-
-class TlsHelperTests(unittest.TestCase):
-    def test_san_entries_are_unique_and_ordered(self) -> None:
-        self.assertEqual(
-            inst.tls_san_entries("PC-01", ["192.168.1.5", "127.0.0.1", "192.168.1.5"]),
-            ["PC-01", "localhost", "127.0.0.1", "192.168.1.5"],
-        )
-
-    def test_is_current(self) -> None:
-        now = 1_000_000.0
-        meta = {"san": ["PC", "localhost", "127.0.0.1", "10.0.0.1"], "not_after": now + 100 * 86400, "created": now}
-        self.assertTrue(inst.tls_is_current(meta, ["PC", "10.0.0.1"], now))
-        self.assertFalse(inst.tls_is_current(meta, ["PC", "10.0.0.2"], now))  # a new LAN address
-        self.assertFalse(inst.tls_is_current({**meta, "not_after": now + 29 * 86400}, ["PC"], now))  # < 30 days left
-        self.assertTrue(inst.tls_is_current({**meta, "not_after": now + 30 * 86400}, ["PC"], now))
-        for broken in (
-            None,
-            {},
-            {"san": "PC", "not_after": now + 1e9},
-            {"san": ["PC"], "not_after": "soon"},
-            {"san": ["PC"], "not_after": True},
-        ):
-            self.assertFalse(inst.tls_is_current(broken, ["PC"], now))
-
-
-@unittest.skipIf(
-    inst.find_openssl(inst.Context(inst.detect_host(), env=dict(os.environ))) is None, "openssl not available"
-)
-class TlsGenerationTests(unittest.TestCase):
-    def openssl_text(self, cert: str) -> str:
-        exe = inst.find_openssl(real_context())
-        return subprocess.run(
-            [exe, "x509", "-in", cert, "-noout", "-text"], capture_output=True, text=True, check=True
-        ).stdout
-
-    def test_generate_reuse_regenerate(self) -> None:
         with tempfile.TemporaryDirectory() as data_dir:
-            tls = os.path.join(data_dir, "tls")
-            cert, key, meta_path = (os.path.join(tls, name) for name in ("cert.pem", "key.pem", "meta.json"))
-            with quiet():
-                inst.ensure_tls(real_context(), data_dir)
-            self.assertFalse(os.path.exists(os.path.join(tls, "openssl.cnf")))  # the cnf is deleted again
-            ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER).load_cert_chain(cert, key)
-            text = self.openssl_text(cert)
-            self.assertIn("CA:FALSE", text)
-            self.assertIn("TLS Web Server Authentication", text)
-            for expected in (
-                "IP Address:192.168.77.5",
-                "IP Address:10.77.0.9",
-                "IP Address:127.0.0.1",
-                "DNS:localhost",
-            ):
-                self.assertIn(expected, text)
-            with open(meta_path, encoding="utf-8") as handle:
-                meta = json.load(handle)
-            self.assertEqual(sorted(meta), ["created", "not_after", "san"])
-            self.assertEqual(meta["san"][1:3], ["localhost", "127.0.0.1"])
-            self.assertIn("192.168.77.5", meta["san"])
-            self.assertAlmostEqual(meta["not_after"] - meta["created"], 825 * 86400, delta=5)
-            if os.name == "posix":
-                self.assertEqual(os.stat(key).st_mode & 0o777, 0o600)
-
-            first_cert, first_key = read_bytes(cert), read_bytes(key)
-            out = io.StringIO()
-            with contextlib.redirect_stdout(out):
-                inst.ensure_tls(real_context(), data_dir)
-            self.assertIn("is current", out.getvalue())
-            self.assertEqual(read_bytes(cert), first_cert)
-
-            ctx = real_context()
-            ctx.lan_fn = lambda: ("192.168.77.5", ["10.77.0.9", "10.88.0.1"])  # a new adapter appeared
-            with quiet():
-                inst.ensure_tls(ctx, data_dir)
-            self.assertIn("IP Address:10.88.0.1", self.openssl_text(cert))
-            self.assertEqual(read_bytes(key), first_key)  # the key is reused
-            self.assertEqual(read_bytes(cert + ".old"), first_cert)  # the old leaf is kept
-
-    def test_health_probe_over_https_with_the_generated_certificate(self) -> None:
-        with tempfile.TemporaryDirectory() as data_dir:
-            with quiet():
-                inst.ensure_tls(real_context(), data_dir)
+            if not tlsutil.ensure_cert(data_dir, hostname="localhost", lan_ips=[]):
+                self.skipTest("no openssl: cannot create a certificate")
             pair = (os.path.join(data_dir, "tls", "cert.pem"), os.path.join(data_dir, "tls", "key.pem"))
             server, port = serve(healthy_routes(), tls=pair)
             self.addCleanup(server.server_close)
@@ -720,54 +641,6 @@ class TlsGenerationTests(unittest.TestCase):
         self.addCleanup(server.server_close)
         self.addCleanup(server.shutdown)
         self.assertIsNone(inst.health_probe("127.0.0.1", port, True, 2.0))
-
-    def test_dry_run_writes_nothing(self) -> None:
-        with tempfile.TemporaryDirectory() as data_dir:
-            out = io.StringIO()
-            with contextlib.redirect_stdout(out):
-                inst.ensure_tls(real_context(dry_run=True), data_dir)
-            self.assertEqual(os.listdir(data_dir), [])
-            self.assertIn("[dry-run] $", out.getvalue())
-            self.assertIn("basicConstraints=critical,CA:FALSE", out.getvalue())
-
-
-class TlsFailureTests(unittest.TestCase):
-    def test_missing_openssl_aborts_with_exit_1(self) -> None:
-        with tempfile.TemporaryDirectory() as data_dir, mock.patch.object(inst, "find_openssl", return_value=None):
-            with self.assertRaises(inst.InstallerError) as caught:
-                inst.ensure_tls(real_context(), data_dir)
-            self.assertEqual(caught.exception.code, inst.EXIT_ERROR)
-            self.assertIn("openssl", str(caught.exception))
-            self.assertEqual(os.listdir(data_dir), [])
-
-    def test_openssl_failure_cleans_up(self) -> None:
-        with tempfile.TemporaryDirectory() as data_dir:
-            ctx = real_context()
-            ctx.run = lambda argv, **kw: inst.Result(1, "", "unable to write 'random state'")  # type: ignore[method-assign]
-            with mock.patch.object(inst, "find_openssl", return_value="openssl"), self.assertRaises(
-                inst.InstallerError
-            ):
-                inst.ensure_tls(ctx, data_dir)
-            self.assertEqual(os.listdir(os.path.join(data_dir, "tls")), [])  # openssl.cnf removed, nothing else left
-
-    def test_openssl_conf_is_removed_from_the_child_environment(self) -> None:
-        seen: Dict[str, Any] = {}
-        with tempfile.TemporaryDirectory() as data_dir:
-            ctx = real_context()
-            ctx.env["OPENSSL_CONF"] = "C:\\evil\\openssl.cnf"
-            ctx.env["openssl_conf"] = "lowercase twin"
-
-            def capture(argv: Any, **kw: Any) -> Any:
-                seen.update(kw)
-                return inst.Result(1, "", "stop here")
-
-            ctx.run = capture  # type: ignore[method-assign]
-            with mock.patch.object(inst, "find_openssl", return_value="openssl"), self.assertRaises(
-                inst.InstallerError
-            ):
-                inst.ensure_tls(ctx, data_dir)
-        self.assertTrue(seen["env"])
-        self.assertNotIn("OPENSSL_CONF", {k.upper() for k in seen["env"]})
 
 
 # ---------------------------------------------------------------------------------------------------------------------

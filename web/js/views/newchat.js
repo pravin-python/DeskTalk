@@ -1,9 +1,9 @@
 /**
  * views/newchat.js - "New chat" (SPEC 9.2 sidebar) and the one shared way to open a direct chat.
  *
- * `open()` shows a dialog with a "New group" row and a searchable list of people; `openDirect(userId)`
- * starts (or reopens) the direct chat with a person and navigates to it. The people list is the target
- * picker of views/forward.js (docs/ui-conv-api.md section 3), loaded on demand.
+ * `open()` shows a dialog with a "New group" row and the searchable people list of core/ui.js
+ * (`ui.peoplePicker`); `openDirect(userId)` starts (or reopens) the direct chat with a person and
+ * navigates to it.
  */
 
 import { h } from '../core/dom.js';
@@ -39,18 +39,10 @@ export async function openDirect(userId, { replace = false } = {}) {
 }
 
 /**
- * Show the New chat dialog. Resolves when it has been closed.
+ * Show the New chat dialog. Resolves when it has been closed (and the chosen action has run).
  * @returns {Promise<void>}
  */
 export async function open() {
-  let forward;
-  try {
-    forward = await import('./forward.js');
-  } catch (err) {
-    console.error('[newchat] the people picker could not be loaded', err);
-    ui.toast('The people list is not available right now.', { type: 'error' });
-    return;
-  }
   /** @type {null|number|'group'} */
   let choice = null;
   /** @type {any} */
@@ -60,15 +52,7 @@ export async function open() {
     choice = value;
     if (dlg) dlg.close();
   };
-  const picker = forward.createTargetPicker({
-    people: true,
-    chats: false,
-    max: 1,
-    onChange: (selection) => {
-      const first = selection && selection[0];
-      if (first && first.kind === 'user') finish(first.id);
-    },
-  });
+  const picker = ui.peoplePicker({ multi: false, onPick: (user) => finish(user.id) });
   const groupRow = h('button.nc-group', { type: 'button', onClick: () => finish('group') },
     avatar({ id: 0, name: '', group: true }, { size: 'md' }),
     h('span.grow', h('span.nc-group-title', 'New group'), h('span.muted.nc-group-sub', 'Chat with several people at once')),
@@ -80,7 +64,6 @@ export async function open() {
     content: h('div.nc', groupRow, picker.el),
     actions: [{ label: 'Cancel', value: false }],
   });
-  picker.focus();
   await dlg.closed;
   picker.destroy();
   if (choice === 'group') await newgroup.open();
