@@ -999,42 +999,28 @@ class BackupTests(TempDirCase):
     "no openssl",
 )
 class TlsCheckTests(TempDirCase):
-    def make_cert(self, days: int = 825, san: Optional[List[str]] = None) -> Dict[str, Path]:
-        import subprocess
-
+    def make_cert(self, days: int = 825, san: Optional[List[str]] = None) -> None:
+        """Create a real certificate with ``tlsutil.ensure_cert`` and rewrite ``meta.json`` for the scenario."""
         from chatd import tlsutil
 
-        tls = Path(self.data) / "tls"
-        tls.mkdir()
-        cnf = tls / "openssl.cnf"
         hostname = socket.gethostname() or "localhost"
-        cnf.write_text(
-            "[req]\ndistinguished_name=dn\nx509_extensions=v3\nprompt=no\n[dn]\nCN=%s\n[v3]\nsubjectAltName=@alt\n[alt]\nDNS.1=%s\nIP.1=127.0.0.1\n"
-            % (hostname[:60], hostname[:60]),
-            encoding="ascii",
-        )
-        env = {k: v for k, v in os.environ.items() if k != "OPENSSL_CONF"}
-        command = [tlsutil.find_openssl(), "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-sha256", "-days", "825"]
-        command += ["-config", str(cnf), "-keyout", str(tls / "key.pem"), "-out", str(tls / "cert.pem")]
-        subprocess.run(command, check=True, capture_output=True, env=env)
-        cnf.unlink()
-        wanted = san if san is not None else [hostname, "localhost", "127.0.0.1"]
-        meta = {"san": wanted, "created": 0.0, "not_after": doctor.time.time() + days * 86400}
-        (tls / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
-        return {"cert": tls / "cert.pem", "key": tls / "key.pem"}
+        if not tlsutil.ensure_cert(self.data, hostname=hostname, lan_ips=[]):
+            self.skipTest("tlsutil.ensure_cert could not create a certificate here")
+        meta_path = Path(self.data) / "tls" / "meta.json"
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        meta["not_after"] = doctor.time.time() + days * 86400
+        if san is not None:
+            meta["san"] = san
+        meta_path.write_text(json.dumps(meta), encoding="utf-8")
 
     def check(self, cfg: Any, lan: Any = (None, [])) -> List[doctor.Row]:
-        from chatd import tlsutil
-
-        with mock.patch.object(util, "lan_addresses", return_value=lan), mock.patch.object(
-            tlsutil, "cert_fingerprint", create=True, return_value="AA:BB:CC"
-        ):
+        with mock.patch.object(util, "lan_addresses", return_value=lan):
             return doctor.check_tls(cfg)
 
     def test_current_certificate(self) -> None:
         self.make_cert()
         rows = self.check(make_cfg(self.data, tls=True))
-        self.assertIn("SHA-256 fingerprint AA:BB:CC", find(rows, "TLS").detail)
+        self.assertRegex(find(rows, "TLS").detail, r"SHA-256 fingerprint ([0-9A-F]{2}:){31}[0-9A-F]{2}$")
         self.assertEqual(find(rows, "TLS expiry").level, doctor.PASS)
         self.assertEqual(find(rows, "TLS names").level, doctor.PASS)
         if os.name == "posix":

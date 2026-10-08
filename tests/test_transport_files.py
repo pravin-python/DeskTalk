@@ -448,6 +448,16 @@ class UploadTests(FilesBase):
         att = self.upload_ok(b"\0" * self.cfg.max_upload_bytes, name="max.bin")
         self.assertEqual(att["size"], self.cfg.max_upload_bytes)
 
+    def test_file_name_must_be_valid_utf8_text(self) -> None:
+        for raw in ("bad%ff.txt", "%ed%a0%80.txt", "x%c0%afy"):
+            request = upload_request(b"data", name=None).replace(
+                b"Content-Length", b"X-File-Name: " + raw.encode() + b"\r\nContent-Length", 1
+            )
+            status, _, body = support.exchange(self.h.port, request, timeout=10)
+            self.assertEqual(status, 400, raw)
+            self.assertIn(b'"reason":"invalid_text"', body)
+        self.assertEqual(self.query("SELECT COUNT(*) FROM attachments"), [(0,)])
+
     def test_blocked_extensions(self) -> None:
         for name in ("setup.exe", "a.BAT", "x.tar.cmd", "evil.exe.", "evil.exe ", "pay.scr", "x.jar", ".lnk"):
             status, _, body = self.upload(b"MZ", name=name)
