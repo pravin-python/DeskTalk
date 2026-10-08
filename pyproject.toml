@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "DeskTalk"
+dynamic = ["version"]
+description = "LAN real-time chat - pure standard library"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = []
+
+[project.scripts]
+desktalk-server = "desktalk.server.app:main"
+desktalk-gui = "desktalk.ui.gui:main"
+desktalk-cli = "desktalk.ui.cli:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "desktalk.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["desktalk*"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py38"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "BLE", "S110", "RET", "SIM"]
+ignore = [
+    "B904",    # "raise ... from": ProtocolError messages are user-facing, chaining adds nothing
+    "RET505",  # explicit else after return reads better in handlers
+    "SIM105",  # try/except/pass is clearer than contextlib.suppress in socket teardown
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["BLE001", "S110", "B"]

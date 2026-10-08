@@ -1,43 +1,43 @@
-# FreeChat — LAN Real-Time Chat
+# DeskTalk — LAN Real-Time Chat
 
-Office ke LAN pe real-time chat. Pure Python, **sirf standard library** — koi `pip install` nahi.
-Windows, macOS aur Ubuntu — teeno pe same code chalta hai.
+Real-time chat over local network (LAN). Written in pure Python using **standard library only** — no `pip install` required.
+Runs seamlessly across Windows, macOS, and Linux (Ubuntu).
 
 ```
 ┌─────────────┐        TCP 9009         ┌─────────────┐
-│  Aapka PC   │ ◄─────────────────────► │  server.py  │  ← koi ek machine pe
+│   Your PC   │ ◄─────────────────────► │  server.py  │  ← on any one machine
 │ 172.31.1.143│                         │ (hub)       │
 └─────────────┘                         └─────────────┘
 ┌─────────────┐                               ▲
-│ Dost ka PC  │ ──────────────────────────────┘
+│ Peer's PC   │ ──────────────────────────────┘
 └─────────────┘        UDP 9010 = auto-discovery
 ```
 
 ---
 
-## Setup (3 step)
+## Setup (3 Steps)
 
-### 1. Ek machine pe server chalao
+### 1. Run the server on one machine
 
-Aapke PC pe (IP `172.31.1.143`):
+On your PC (e.g., IP `172.31.1.143`):
 
 ```bash
 python server.py
 ```
 
-Output me aapka address dikhega — wahi dost ko dena hai:
+The output will display your IP address — share this address with your peers:
 
 ```
-  FreeChat server chal raha hai: 'DESKTOP-XYZ room'
+  DeskTalk server running: 'DESKTOP-XYZ room'
   TCP port: 9009
-  Dost ko ye address do:
+  Share this address with others:
       172.31.1.143:9009
 ```
 
-> Server sirf **ek** machine pe chalega. Baaki sab client hain.
-> Aap khud bhi client chala sakte ho usi machine pe.
+> The server runs on **one** machine only. All other users connect as clients.
+> You can also run a client on the same machine hosting the server.
 
-### 2. Sab log client chalao
+### 2. Run the client on all machines
 
 GUI (recommended):
 
@@ -45,14 +45,14 @@ GUI (recommended):
 python chat_gui.py
 ```
 
-Window me **LAN scan** dabao — server apne aap mil jaayega — phir **Connect**.
-Ya seedha IP de do:
+Click **LAN scan** in the window — the server will be detected automatically — then click **Connect**.
+Or directly specify the server IP:
 
 ```bash
 python chat_gui.py --host 172.31.1.143 --name pravin
 ```
 
-Terminal pasand hai to:
+Terminal client:
 
 ```bash
 python chat_cli.py --host 172.31.1.143 --name pravin
@@ -62,18 +62,18 @@ python chat_cli.py --host 172.31.1.143 --name pravin
 python chat_cli.py --scan
 ```
 
-### 3. Firewall allow karo (server wali machine pe)
+### 3. Allow through Firewall (Server machine)
 
-Ye sabse common dikkat hai — connect nahi hota to 90% baar firewall hi hota hai.
+If connection fails, it is usually due to firewall settings blocking the ports.
 
-**Windows** (PowerShell, Administrator ke roop me):
+**Windows** (PowerShell, as Administrator):
 
 ```powershell
-New-NetFirewallRule -DisplayName "FreeChat TCP" -Direction Inbound -Protocol TCP -LocalPort 9009 -Action Allow
+New-NetFirewallRule -DisplayName "DeskTalk TCP" -Direction Inbound -Protocol TCP -LocalPort 9009 -Action Allow
 ```
 
 ```powershell
-New-NetFirewallRule -DisplayName "FreeChat UDP discovery" -Direction Inbound -Protocol UDP -LocalPort 9010 -Action Allow
+New-NetFirewallRule -DisplayName "DeskTalk UDP discovery" -Direction Inbound -Protocol UDP -LocalPort 9010 -Action Allow
 ```
 
 **Ubuntu**:
@@ -82,73 +82,123 @@ New-NetFirewallRule -DisplayName "FreeChat UDP discovery" -Direction Inbound -Pr
 sudo ufw allow 9009/tcp && sudo ufw allow 9010/udp
 ```
 
-**macOS**: pehli baar Python ko incoming connection ka prompt aayega — **Allow** dabao.
+**macOS**: When Python requests incoming connections for the first time, click **Allow**.
 
 ---
 
-## Chat ke andar commands
+## In-Chat Commands
 
-| Command | Kaam |
+| Command | Description |
 |---|---|
-| `/dm <naam> <message>` | Private message kisi ek ko |
-| `/who` | Kaun online hai |
-| `/quit` | Exit |
+| `/dm <name> <message>` | Send a private message to a user |
+| `/who` | List online users |
+| `/quit` | Exit chat |
 
-GUI me right side ki user list me kisi naam pe **double-click** karo — `/dm` apne aap bhar jaayega.
+In GUI, **double-click** any username in the right panel user list to pre-fill `/dm`.
 
 ---
 
-## Files
+## Project Structure
 
-| File | Kya hai |
-|---|---|
-| `server.py` | asyncio TCP hub + UDP discovery responder |
-| `chat_gui.py` | Tkinter GUI client |
-| `chat_cli.py` | Terminal client |
-| `freechat/protocol.py` | Message format (newline-delimited JSON) |
-| `freechat/client.py` | Client core — dono clients isi ko use karte hain |
-| `freechat/discovery.py` | LAN broadcast scan |
+```
+server.py  chat_gui.py  chat_cli.py     thin entry-point wrappers (python server.py ...)
+pyproject.toml                          packaging, console scripts, ruff config
+desktalk/
+  protocol.py     wire format (newline-delimited JSON), limits, input validation
+  errors.py       DeskTalkError / ProtocolError / StoreError
+  log.py          logging setup (--verbose, --log-file)
+  store.py        chat history: thread-safe SQLite with RAM fallback
+  discovery.py    LAN scan + probe/reply format (malformed replies are ignored)
+  client.py       ChatClient: background thread, auto-reconnect, heartbeat
+  argtypes.py     shared argparse helpers
+  server/
+    hub.py          ChatServer: join/auth, routing, history, presence
+    connection.py   per-client send queue (a slow client cannot block others)
+    responder.py    UDP discovery responder
+    app.py          argument parsing, startup, graceful shutdown (python -m desktalk.server)
+  ui/
+    gui.py          Tkinter GUI
+    cli.py          terminal client
+    common.py       command parsing shared by both
+tests/              run from the repo root: python -m unittest discover -s tests -v
+```
 
 ---
 
 ## Requirements
 
-- Python 3.8+ (aapke paas 3.10.11 hai ✓)
-- Ubuntu pe GUI ke liye: `sudo apt install python3-tk`
-- Sab machines **ek hi LAN/subnet** pe honi chahiye
+- Python 3.8+
+- On Ubuntu (for GUI): `sudo apt install python3-tk`
+- All machines must be on the **same LAN / subnet**
 
 ---
 
-## Options
+## Password, History, Reconnect
+
+**Shared Password** (optional) — requires users to enter password before joining:
+
+```bash
+python server.py --password secret          # or: set DESKTALK_PASSWORD=secret
+python chat_gui.py --password secret        # GUI has a "Password" entry box
+python chat_cli.py --host 172.31.1.143 --password secret
+```
+
+LAN scan shows `[password required]` for password-protected servers. Incorrect password denies connection attempts.
+
+**History** — public messages are saved to SQLite database file (`desktalk.db`, next to `server.py`).
+Newly joined users receive the last 30 messages even after a server restart. To change database path: `--db path.db`.
+`--db :memory:` = disable persistent storage (RAM only). If Python lacks the `sqlite3` module, server automatically degrades to RAM history with a warning.
+
+**Auto-reconnect** — Clients automatically reconnect upon WiFi or network drops (exponential backoff: 1s, 2s, 4s … up to 10s) and fetch missed messages without duplication. Heartbeat runs every 15s; if no response within 45s, connection is considered dead. Fatal errors like incorrect password or username already taken will not attempt auto-reconnect.
+
+---
+
+## Error Handling & Logs
+
+- Server and clients use `logging`: `-v/--verbose` enables debug logs, `--log-file chat.log` also writes to a file.
+- Hostile or malformed input (bad JSON, deeply nested JSON, lone-surrogate emoji, wrong field types,
+  messages over 4000 characters) only gets that client an error — the connection and other users are unaffected.
+- A bug in a message handler is logged, the client receives an "internal error" reply, and the server keeps running.
+- Port already in use: a clear message and exit code 1 instead of a traceback. On Ctrl+C every client is told
+  the server is shutting down (and their clients reconnect automatically when it is back).
+- GUI: connecting happens in the background (no frozen window), Tk callback errors are shown in the chat window,
+  emoji are handled safely, and the chat log is trimmed to 2000 lines.
+
+---
+
+## Command-Line Options
 
 ```bash
 python server.py --port 9009 --name "Dev team room"
-python server.py --no-discovery          # UDP broadcast band
-python server.py --host 172.31.1.143     # sirf ek interface pe bind
+python server.py --db D:/chat/history.db
+python server.py --no-discovery          # disable UDP broadcast discovery
+python server.py -v --log-file chat.log  # debug logs + log file
+python server.py --host 172.31.1.143     # bind to specific network interface
 ```
 
 ---
 
 ## Troubleshooting
 
-**"Connect nahi hua"**
-1. Server wali machine pe `server.py` chal raha hai? Terminal check karo.
-2. Dusre PC se ping karo: `ping 172.31.1.143`
-3. Firewall rule add kiya? (upar step 3)
-4. Dono machines same subnet pe hain? (`172.31.1.x`)
+**"Failed to connect"**
+1. Check if `server.py` is running on the server host machine.
+2. Ping the server host from client PC: `ping 172.31.1.143`
+3. Ensure firewall rules are added (see step 3).
+4. Verify both machines are on the same subnet (`172.31.1.x`).
 
-**LAN scan me kuch nahi milta**
-Bahut saare office networks UDP broadcast block karte hain. Ye normal hai —
-seedha IP type kar do, TCP connection phir bhi chalega.
+**"LAN scan finds no servers"**
+Some office networks block UDP broadcast packets. Type the server IP directly to connect via TCP.
 
-**"Naam already use me hai"**
-Koi aur usi naam se juda hua hai. `--name` badal do.
+**"Name already in use"**
+Another connected user is using that name. Change name using `--name`.
 
 ---
 
-## Scope note
+## Security & Scope Note
 
-Ye LAN ke liye bana hai, isliye **encryption aur authentication nahi hai** —
-traffic plaintext JSON hai aur koi bhi koi bhi naam le sakta hai. Office ke trusted
-network ke liye theek hai; internet pe expose mat karna (router pe port forward mat karo).
-Agar aage chahiye to TLS (`ssl` module) aur ek shared password add kiya ja sakta hai.
+DeskTalk is built specifically for trusted local network (LAN) environments.
+The shared password serves as an entry gate — **traffic is not encrypted**:
+Payload data (including password and messages) is transmitted as plaintext JSON.
+Do not expose the server port directly to the internet (avoid router port forwarding).
+If required, TLS support (`ssl` module) and per-user authentication can be added.
+

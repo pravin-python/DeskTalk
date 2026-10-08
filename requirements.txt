@@ -1,0 +1,2 @@
+# DeskTalk requires Python 3.8+ and standard library only.
+# No third-party packages are required to run the server, GUI, or CLI.
