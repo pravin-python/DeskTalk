@@ -28,3 +28,9 @@ desktop.ini
 *.db
 *.db-wal
 *.db-shm
+
+# DeskTalk 2 runtime data / secrets (SPEC §1)
+data/
+*.pem
+setup_code.txt
+backups/
