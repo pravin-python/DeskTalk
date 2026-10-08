@@ -23,3 +23,8 @@ desktop.ini
 
 # Logs & temp files
 *.log
+
+# Chat history database (SQLite)
+*.db
+*.db-wal
+*.db-shm
