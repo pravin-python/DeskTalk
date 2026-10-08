@@ -5,33 +5,51 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "DeskTalk"
 dynamic = ["version"]
-description = "LAN real-time chat - pure standard library"
+description = "LAN WhatsApp/Teams-style chat - offline, standard-library-only server"
 readme = "README.md"
 requires-python = ">=3.8"
 dependencies = []
 
 [project.scripts]
-desktalk-server = "desktalk.server.app:main"
-desktalk-gui = "desktalk.ui.gui:main"
-desktalk-cli = "desktalk.ui.cli:main"
+desktalk = "chatd.__main__:main"
 
 [tool.setuptools.dynamic]
-version = { attr = "desktalk.__version__" }
+version = { attr = "chatd.__version__" }
 
 [tool.setuptools.packages.find]
-include = ["desktalk*"]
+include = ["chatd*"]
 
+# ---------------------------------------------------------------------------
+# Lint (ruff). The server must stay valid Python 3.8 and standard-library only
+# (docs/SPEC.md section 0); `legacy/` is the frozen v1 chat and is not linted.
+# ---------------------------------------------------------------------------
 [tool.ruff]
 line-length = 120
 target-version = "py38"
+extend-exclude = ["legacy"]
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "B", "BLE", "S110", "RET", "SIM"]
+select = [
+    "E", "W",   # pycodestyle
+    "F",        # pyflakes
+    "I",        # import order
+    "B",        # bugbear
+    "BLE",      # no blind `except Exception` without a noqa + reason
+    "S110",     # try/except/pass must log
+    "RET", "SIM", "C4", "PIE",
+]
 ignore = [
-    "B904",    # "raise ... from": ProtocolError messages are user-facing, chaining adds nothing
-    "RET505",  # explicit else after return reads better in handlers
+    "B904",    # `raise ... from`: user-facing error texts, chaining adds nothing
+    "RET505",  # explicit `else` after `return` reads better in protocol handlers
     "SIM105",  # try/except/pass is clearer than contextlib.suppress in socket teardown
 ]
 
+[tool.ruff.lint.isort]
+known-first-party = ["chatd", "tests"]
+required-imports = ["from __future__ import annotations"]
+
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["BLE001", "S110", "B"]
+"server.py" = ["I002", "E402"]
+"__init__.py" = ["I002"]
+"web/**" = ["ALL"]

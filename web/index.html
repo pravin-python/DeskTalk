@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#0f766e" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#111b21" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="DeskTalk">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="format-detection" content="telephone=no">
+  <title>DeskTalk</title>
+  <link rel="icon" type="image/png" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAAABXAvmHAAADpklEQVR42tXV22sUVxwH8N97stcEhP4Fbp8EYUEfKvrYB5/XS73baLTZTdUkxiYbNTczm2ySqlUQLYXaos0mXqIY4wWkULYo0mL71CqIvnjB8Qarwtffb5hdcnEz52ySSebAB2bPnHN+3x+7M0uVx9NURJQZLMtMBpeZdm3DzvLJnFR5rGeiCMswzDMZO9u4vFT5Q/dYMZZjmKdydsZCZqo4msqLMXhELJ+bKg4bIsJyDB6RszNzA993iQyDx0hmbqC/M8rgUVGq6OswGDzKoHC6PcvgUVkK97SZDB5lUri7FV5G4dRB6Pjylx9x5p+/8eilibfv3s0IOUvOlLN181C4az9Utd66jtkeUkMnE4UOtUDFN5fPwa0htVRzUagzCRUPzReuNSC1VHNRqKMZTlaePgW3h9RUyUahtiY4qRkecr0BqamSjUKt38FJYg4akJoq2Sh0sBFOEsODc9DAIFSyUfDAXjhJXJy6geozP2NhaxPiA78W5obv/YWl6U6LXOeHrJG1smfKBrimSjYKtjTASeJCpmihI7duIFBXU3Dyj9+t+Uhbc2FOrmXIvbFrZW/RBrimSjYKJuvhJHF+oGihjquXx4XqvTlqzS9o3FWYk2sZcm/sWtlbtAGuqZKNgs11cBKfooHH/M5e0tNpBVrWZ+D5mzfWfOr6SCGoXMuQe7JG5mTP4yn+W6SmSjYKNu2Bk/i53xwfuv+fPpk09+TVK4vK2kkNcE2VbBTYx1+1g/jQWdffQlJTJRsFGr+Fk/jgHDTANVWyUWBvLZzEfjrhegNSUyUbBRoScPJZcz3ef/jgWnipJTVVslGgLg4VxrUrrjUgtVRzkX9PDVQN3L096+Glhk4m8u/eCR2N5zO4/+zpjAeXM+Vs3Tzk37UDulbwn1F+PHv92vr8RfpQyRa1t6CUHIL8tdXQVT/htWo10duFUs6aLvIntkPX2Tt/TvoJWE2ku1DKedNB/vg26How4RkY/fceFrclUcpZ00W+miro+DzZMC58kh883TNmEvl2boWO9SePW8Gz9//D8lQ7dPfPNPLt2AIdh6+NIHXlEnT3zRbyVW82GVSt7O+GzvpZZpJv+6Ysg4qgdK241iVZKq/aaDB4lEHlX2+IMnhUlMq3rhMZBo+RzETlW74SEZZj8IicnZkb2LQ2L8bgEbF8birbuGasGMsxzFM5O2MhM5VtWD1RhGUY5pmMnW1cXipbv6qYKDNYlpkMLjPt2oad5ZM5PwLr1rW/YIripQAAAABJRU5ErkJggg==">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/img/icon-180.png">
+  <link rel="stylesheet" href="/css/base.css">
+  <link rel="stylesheet" href="/css/auth.css">
+  <link rel="stylesheet" href="/css/sidebar.css">
+  <link rel="stylesheet" href="/css/panels.css">
+  <link rel="stylesheet" href="/css/conversation.css">
+  <link rel="stylesheet" href="/css/composer.css">
+</head>
+<body>
+  <noscript><p class="noscript">DeskTalk needs JavaScript. Please enable it in your browser settings and reload this page.</p></noscript>
+
+  <div id="boot" class="boot" role="status"><div class="boot-card"><span class="spinner boot-spinner" aria-hidden="true"></span><p>Loading…</p></div></div>
+  <div id="auth-root" class="auth-root" hidden></div>
+  <div id="app" class="app" data-view="list" data-drawer="closed" hidden>
+    <aside id="pane-sidebar" class="pane pane-sidebar" aria-label="Chats"></aside>
+    <main id="pane-main" class="pane pane-main"></main>
+    <aside id="pane-drawer" class="pane pane-drawer" aria-label="Details" hidden></aside>
+  </div>
+  <div id="conn-banner" class="conn-banner" role="status" hidden></div>
+  <div id="overlay-root" class="overlay-root"></div>
+  <div id="toast-root" class="toast-root" role="region" aria-live="polite" aria-label="Notifications"></div>
+
+  <script type="module" src="/js/main.js"></script>
+  <script nomodule src="/js/unsupported.js"></script>
+</body>
+</html>

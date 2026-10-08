@@ -1,0 +1,106 @@
+/*
+ * auth.css - the signed-out screens (views/auth.js) plus a few form helpers shared with panels.css.
+ * Uses only the tokens of base.css, so both themes and the font-size preference apply.
+ */
+
+.auth-root {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-banner);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  background: var(--bg-app);
+}
+
+.auth-page {
+  display: flex;
+  min-height: 100%;
+  padding: calc(var(--safe-top) + var(--sp-6)) max(var(--sp-4), var(--safe-right)) calc(var(--safe-bottom) + var(--sp-6)) max(var(--sp-4), var(--safe-left));
+}
+
+.auth-shell {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  width: 100%;
+  max-width: 420px;
+  margin: auto;
+}
+
+.auth-brand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-3);
+  font-size: var(--fs-xl);
+  font-weight: 600;
+}
+
+.auth-logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 48px;
+  height: 48px;
+  border-radius: var(--r-full);
+  background: var(--accent);
+  color: var(--text-on-accent);
+}
+
+.auth-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-6);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--bg-panel);
+  box-shadow: var(--shadow-1);
+}
+
+.auth-title { font-size: var(--fs-xl); font-weight: 600; }
+.auth-lead { margin-top: calc(-1 * var(--sp-1)); }
+
+.auth-form { display: flex; flex-direction: column; gap: var(--sp-4); margin-top: var(--sp-2); }
+
+.auth-banner { align-items: flex-start; }
+.auth-banner > svg { flex: none; margin-top: 2px; }
+
+.auth-error {
+  padding: var(--sp-3);
+  border-radius: var(--r-md);
+  background: var(--danger-soft);
+  color: var(--text);
+  font-size: var(--fs-sm);
+  overflow-wrap: anywhere;
+}
+
+.auth-submit { margin-top: var(--sp-1); }
+.auth-submit .spinner { width: 16px; height: 16px; }
+
+.auth-aside { font-size: var(--fs-sm); text-align: center; }
+
+.input-wrap { position: relative; display: flex; align-items: center; }
+.input-wrap .input { padding-inline-end: 48px; }
+.pw-toggle { position: absolute; inset-inline-end: 2px; top: 50%; transform: translateY(-50%); }
+
+.btn-link {
+  display: inline;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-link);
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.btn-link:hover { text-decoration: none; }
+
+.input[aria-invalid='true'] { border-color: var(--danger); }
+
+@media (max-width: 479.98px) {
+  .auth-card { padding: var(--sp-4); border-radius: var(--r-md); }
+}

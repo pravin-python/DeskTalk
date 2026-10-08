@@ -1,204 +1,210 @@
 # DeskTalk — LAN Real-Time Chat
 
-Real-time chat over local network (LAN). Written in pure Python using **standard library only** — no `pip install` required.
-Runs seamlessly across Windows, macOS, and Linux (Ubuntu).
+A modern, internal **WhatsApp / Teams-style chat** for office local networks (LAN). Works **100% offline with no internet connection**.
+
+Written in pure Python using **standard library only** (no `pip install` required for the server). One machine runs the server, and everyone else connects directly using any modern web browser on desktop or mobile.
 
 ```
-┌─────────────┐        TCP 9009         ┌─────────────┐
-│   Your PC   │ ◄─────────────────────► │  server.py  │  ← on any one machine
-│ 172.31.1.143│                         │ (hub)       │
-└─────────────┘                         └─────────────┘
-┌─────────────┐                               ▲
-│ Peer's PC   │ ──────────────────────────────┘
-└─────────────┘        UDP 9010 = auto-discovery
+┌─────────────────┐        HTTP / WebSocket (8765)        ┌─────────────────┐
+│ Browser Client  │ ◄───────────────────────────────────► │    server.py    │
+│ (Desktop/Phone) │                                       │ (chatd engine)  │
+└─────────────────┘                                       └─────────────────┘
 ```
 
 ---
 
-## Setup (3 Steps)
+## Key Features
 
-### 1. Run the server on one machine
+- 🌐 **Web-Based Client**: Pure HTML5/CSS/JS ES modules — no build step, no npm, no external CDNs.
+- 🔒 **Zero Internet / Standalone**: Runs completely offline inside your office LAN/VLAN.
+- ⚡ **Pure Standard Library Server**: Built with Python 3.8+ `asyncio` and `sqlite3` (WAL mode).
+- 💬 **Rich Messaging**: Direct messages, group chats ("Everyone" & custom groups), mentions, replies, reactions, and pinned messages.
+- 📁 **File & Media Sharing**: Upload images, audio notes, video, and documents with built-in preview and storage quotas.
+- 🔑 **Account & Admin Roles**: Username/password accounts, one-time setup code, workspace administration, and audit logs.
+- 🛠️ **Cross-Platform Service**: Native installer for Windows Task Scheduler, Linux systemd, and macOS launchd.
+- 🔐 **Security & TLS**: Hashed passwords (scrypt), HttpOnly session cookies, CSRF/CSWSH protection, path traversal defenses, and optional self-signed TLS (`--tls`).
 
-On your PC (e.g., IP `172.31.1.143`):
+---
+
+## Quick Start
+
+### 1. Start the Server
+
+On the host machine:
 
 ```bash
 python server.py
+# or
+python -m chatd serve
 ```
 
-The output will display your IP address — share this address with your peers:
+On first run, the server prints a **one-time setup code** (also saved in `data/setup_code.txt`):
 
 ```
-  DeskTalk server running: 'DESKTOP-XYZ room'
-  TCP port: 9009
-  Share this address with others:
-      172.31.1.143:9009
+  DeskTalk server running on port 8765
+  Setup Code: XXXXXXXX
+  Open in browser: http://<your-lan-ip>:8765
 ```
 
-> The server runs on **one** machine only. All other users connect as clients.
-> You can also run a client on the same machine hosting the server.
+### 2. Connect from Any Browser
 
-### 2. Run the client on all machines
+Open `http://<server-ip>:8765` on your PC, laptop, or phone connected to the office Wi-Fi.
 
-GUI (recommended):
-
-```bash
-python chat_gui.py
-```
-
-Click **LAN scan** in the window — the server will be detected automatically — then click **Connect**.
-Or directly specify the server IP:
-
-```bash
-python chat_gui.py --host 172.31.1.143 --name pravin
-```
-
-Terminal client:
-
-```bash
-python chat_cli.py --host 172.31.1.143 --name pravin
-```
-
-```bash
-python chat_cli.py --scan
-```
-
-### 3. Allow through Firewall (Server machine)
-
-If connection fails, it is usually due to firewall settings blocking the ports.
-
-**Windows** (PowerShell, as Administrator):
-
-```powershell
-New-NetFirewallRule -DisplayName "DeskTalk TCP" -Direction Inbound -Protocol TCP -LocalPort 9009 -Action Allow
-```
-
-```powershell
-New-NetFirewallRule -DisplayName "DeskTalk UDP discovery" -Direction Inbound -Protocol UDP -LocalPort 9010 -Action Allow
-```
-
-**Ubuntu**:
-
-```bash
-sudo ufw allow 9009/tcp && sudo ufw allow 9010/udp
-```
-
-**macOS**: When Python requests incoming connections for the first time, click **Allow**.
+- **First user**: Enter the setup code printed by the server to create the **Admin account**.
+- **Team members**: Register using the join code (if enabled by admin) or log in to start chatting.
 
 ---
 
-## In-Chat Commands
+## CLI Commands (`python -m chatd <command>`)
+
+DeskTalk provides a suite of administrative and maintenance CLI commands:
 
 | Command | Description |
 |---|---|
-| `/dm <name> <message>` | Send a private message to a user |
-| `/who` | List online users |
-| `/quit` | Exit chat |
+| `serve` | Run the chat server (default port `8765`, host `0.0.0.0`) |
+| `create-admin <username>` | Create or promote a user to admin (rescue path / CLI admin setup) |
+| `reset-password <username>` | Reset a user's password and revoke active sessions |
+| `backup [--out DIR] [--with-uploads]` | Take a consistent snapshot of the SQLite database and uploads |
+| `restore <path>` | Restore database and uploads from a backup snapshot |
+| `doctor` | Run system diagnostics (Python 3.8+, SQLite >= 3.24, ports, WAL, permissions) |
+| `--version` | Print app and schema version |
 
-In GUI, **double-click** any username in the right panel user list to pre-fill `/dm`.
+### Examples:
+
+```bash
+# Run server on custom port with TLS
+python -m chatd serve --port 8765 --name "Engineering Team" --tls
+
+# Run system diagnostic doctor
+python -m chatd doctor
+
+# Reset admin password
+python -m chatd reset-password admin
+```
 
 ---
 
-## Project Structure
+## Service Installation (Run on Boot)
+
+To run DeskTalk as a background system service that starts automatically on boot:
+
+```bash
+# Run as administrator / root
+python service/install_service.py install
+```
+
+Supported platforms:
+- **Windows**: Windows Task Scheduler (`DeskTalk` task)
+- **Linux**: systemd unit (`desktalk.service`)
+- **macOS**: launchd daemon (`com.desktalk.server.plist`)
+
+To check status or uninstall:
+```bash
+python service/install_service.py status
+python service/install_service.py uninstall
+```
+
+---
+
+## Configuration Options
+
+Configuration resolution order: **CLI Flags > Environment Variables (`DESKTALK_*`) > `data/config.json` > Defaults**.
+
+| Key | Flag | Environment Variable | Default | Description |
+|---|---|---|---|---|
+| `host` | `--host` | `DESKTALK_HOST` | `0.0.0.0` | Bind address |
+| `port` | `--port` | `DESKTALK_PORT` | `8765` | TCP port |
+| `data_dir` | `--data-dir` | `DESKTALK_DATA_DIR` | `<app>/data` | Directory for DB, uploads, logs & TLS |
+| `workspace_name` | `--name` | `DESKTALK_NAME` | `DeskTalk` | Workspace title |
+| `registration_open` | `--registration` / `--no-registration` | `DESKTALK_REGISTRATION` | `false` | Allow open user registration |
+| `max_upload_mb` | `--max-upload-mb` | `DESKTALK_MAX_UPLOAD_MB` | `100` | Max file upload size (MB) |
+| `tls` | `--tls` / `--no-tls` | `DESKTALK_TLS` | `false` | Enable HTTPS / WSS |
+| `log_level` | `--log-level` | `DESKTALK_LOG` | `INFO` | Logging level (`DEBUG`, `INFO`, etc.) |
+
+---
+
+## Firewall Rules
+
+Ensure port **8765** is allowed inbound on the server host machine.
+
+**Windows (PowerShell as Administrator):**
+```powershell
+New-NetFirewallRule -DisplayName "DeskTalk TCP" -Direction Inbound -Protocol TCP -LocalPort 8765 -Action Allow
+```
+
+**Linux (Ubuntu / ufw):**
+```bash
+sudo ufw allow 8765/tcp
+```
+
+---
+
+## Repository Structure
 
 ```
-server.py  chat_gui.py  chat_cli.py     thin entry-point wrappers (python server.py ...)
-pyproject.toml                          packaging, console scripts, ruff config
 desktalk/
-  protocol.py     wire format (newline-delimited JSON), limits, input validation
-  errors.py       DeskTalkError / ProtocolError / StoreError
-  log.py          logging setup (--verbose, --log-file)
-  store.py        chat history: thread-safe SQLite with RAM fallback
-  discovery.py    LAN scan + probe/reply format (malformed replies are ignored)
-  client.py       ChatClient: background thread, auto-reconnect, heartbeat
-  argtypes.py     shared argparse helpers
-  server/
-    hub.py          ChatServer: join/auth, routing, history, presence
-    connection.py   per-client send queue (a slow client cannot block others)
-    responder.py    UDP discovery responder
-    app.py          argument parsing, startup, graceful shutdown (python -m desktalk.server)
-  ui/
-    gui.py          Tkinter GUI
-    cli.py          terminal client
-    common.py       command parsing shared by both
-tests/              run from the repo root: python -m unittest discover -s tests -v
+├── README.md                      # Project documentation
+├── server.py                      # Entry point wrapper
+├── pyproject.toml                 # Package configuration & ruff settings
+├── requirements.txt               # Dependencies declaration (stdlib only)
+├── docs/
+│   ├── SPEC.md                    # Core specification & contract
+│   ├── DB_API.md                  # Database API (core, users, auth, admin)
+│   ├── DB_API_chat.md             # Database API (chats, messages, receipts)
+│   └── ui-core-api.md             # Frontend core API documentation
+├── chatd/                         # Python server engine
+│   ├── __main__.py                # CLI dispatch & boot wrapper
+│   ├── config.py                  # Configuration loader
+│   ├── db.py                      # Database facade & connection manager
+│   ├── db_users.py                # Users, sessions, admin & audit log
+│   ├── db_chats.py                # Chats, members & direct/group rules
+│   ├── db_messages.py             # Messages, reactions, stars, pins & search
+│   ├── db_receipts.py             # Delivery & read receipts, watermarks
+│   ├── auth.py                    # Password hashing & session tokens
+│   ├── http.py                    # HTTP/1.1 web server & static router
+│   ├── websocket.py               # RFC6455 WebSocket engine
+│   ├── files.py                   # File storage, content sniffing & sanitizing
+│   ├── tlsutil.py                 # Self-signed TLS certificate manager
+│   ├── app.py                     # Server wiring & background tasks
+│   ├── hub.py                     # Real-time WebSocket event dispatcher
+│   ├── maintenance.py             # Admin CLI commands implementation
+│   └── doctor.py                  # Diagnostic & environment checker
+├── web/                           # Client web app (HTML/CSS/JS ES modules)
+│   ├── index.html                 # Main web application UI
+│   ├── css/                       # Modular CSS stylesheets
+│   └── js/                        # ES module JavaScript app logic
+├── service/
+│   └── install_service.py         # Cross-platform background service installer
+├── tests/                         # Automated unit & integration tests
+└── legacy/                        # Legacy v1 terminal & Tkinter client code
 ```
 
 ---
 
 ## Requirements
 
-- Python 3.8+
-- On Ubuntu (for GUI): `sudo apt install python3-tk`
-- All machines must be on the **same LAN / subnet**
+- **Python 3.8+** (supports 3.8 through 3.13)
+- **SQLite 3.24+** (included in standard Python builds)
+- No external `pip` dependencies needed for the server.
 
 ---
 
-## Password, History, Reconnect
+## Running Tests
 
-**Shared Password** (optional) — requires users to enter password before joining:
+To run the full unit and integration test suite:
 
 ```bash
-python server.py --password secret          # or: set DESKTALK_PASSWORD=secret
-python chat_gui.py --password secret        # GUI has a "Password" entry box
-python chat_cli.py --host 172.31.1.143 --password secret
+python -m unittest discover -s tests -v
 ```
-
-LAN scan shows `[password required]` for password-protected servers. Incorrect password denies connection attempts.
-
-**History** — public messages are saved to SQLite database file (`desktalk.db`, next to `server.py`).
-Newly joined users receive the last 30 messages even after a server restart. To change database path: `--db path.db`.
-`--db :memory:` = disable persistent storage (RAM only). If Python lacks the `sqlite3` module, server automatically degrades to RAM history with a warning.
-
-**Auto-reconnect** — Clients automatically reconnect upon WiFi or network drops (exponential backoff: 1s, 2s, 4s … up to 10s) and fetch missed messages without duplication. Heartbeat runs every 15s; if no response within 45s, connection is considered dead. Fatal errors like incorrect password or username already taken will not attempt auto-reconnect.
-
----
-
-## Error Handling & Logs
-
-- Server and clients use `logging`: `-v/--verbose` enables debug logs, `--log-file chat.log` also writes to a file.
-- Hostile or malformed input (bad JSON, deeply nested JSON, lone-surrogate emoji, wrong field types,
-  messages over 4000 characters) only gets that client an error — the connection and other users are unaffected.
-- A bug in a message handler is logged, the client receives an "internal error" reply, and the server keeps running.
-- Port already in use: a clear message and exit code 1 instead of a traceback. On Ctrl+C every client is told
-  the server is shutting down (and their clients reconnect automatically when it is back).
-- GUI: connecting happens in the background (no frozen window), Tk callback errors are shown in the chat window,
-  emoji are handled safely, and the chat log is trimmed to 2000 lines.
-
----
-
-## Command-Line Options
-
-```bash
-python server.py --port 9009 --name "Dev team room"
-python server.py --db D:/chat/history.db
-python server.py --no-discovery          # disable UDP broadcast discovery
-python server.py -v --log-file chat.log  # debug logs + log file
-python server.py --host 172.31.1.143     # bind to specific network interface
-```
-
----
-
-## Troubleshooting
-
-**"Failed to connect"**
-1. Check if `server.py` is running on the server host machine.
-2. Ping the server host from client PC: `ping 172.31.1.143`
-3. Ensure firewall rules are added (see step 3).
-4. Verify both machines are on the same subnet (`172.31.1.x`).
-
-**"LAN scan finds no servers"**
-Some office networks block UDP broadcast packets. Type the server IP directly to connect via TCP.
-
-**"Name already in use"**
-Another connected user is using that name. Change name using `--name`.
 
 ---
 
 ## Security & Scope Note
 
-DeskTalk is built specifically for trusted local network (LAN) environments.
-The shared password serves as an entry gate — **traffic is not encrypted**:
-Payload data (including password and messages) is transmitted as plaintext JSON.
-Do not expose the server port directly to the internet (avoid router port forwarding).
-If required, TLS support (`ssl` module) and per-user authentication can be added.
+DeskTalk is engineered for local network (LAN) environments:
+- **Authentication**: Passwords are saved using `scrypt` / `PBKDF2-HMAC-SHA256`.
+- **Session Tokens**: Stored as SHA256 hashes in DB and passed via HttpOnly `SameSite=Strict` cookies.
+- **Traffic Encryption**: Plain HTTP transmits network traffic unencrypted over LAN. For networks where traffic privacy is required, start the server with `--tls` to enable TLS (HTTPS/WSS).
+- **Internet Exposure**: DeskTalk is designed for LAN use. Do not expose the port directly to the public internet without proper firewall controls or VPN access.
+
 
